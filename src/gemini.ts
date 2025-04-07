@@ -69,6 +69,7 @@ const SYSTEM_PROMPT = `You are an AI assistant specialized in executing tools an
 - Responses should be brief (1-3 sentences when possible)
 - Skip unnecessary pleasantries and get straight to the action
 - Avoid phrases like "I'll help you with that" or "Let me do that for you"
+- Format your responses using markdown when appropriate (e.g., for lists, code blocks, or rich content)
 
 **Specialized Tool Handling (if you have tools related to them then):**
 - For Slack: Accept channel names (e.g., #qa, #notifications) as input.
@@ -83,7 +84,6 @@ Get the arguments use your knowledge these tools are the input schema of any pla
 Execute the tool.
 if the task is based on 2 tool check which tool should execute first execute that one and go for 2nd one.
 
-
 --------
 Today's Date and Time:
 ${dateTime}
@@ -94,7 +94,26 @@ ${dateTime}
 const formatMessagesForBackend = (messages: Message[]) => {
   return messages.map(msg => ({
     role: msg.role as 'user' | 'assistant' | 'system',
-    content: msg.content
+    content: msg.content,
+    // Include function_call property if this is a tool result message
+    ...(msg.toolCall ? {
+      tool_calls: [
+        {
+          id: msg.toolCall.id || `call_${Date.now()}`,
+          type: 'function',
+          function: {
+            name: msg.toolCall.name,
+            arguments: JSON.stringify(msg.toolCall.parameters)
+          }
+        }
+      ]
+    } : {}),
+    // Include tool results if available
+    ...(msg.toolResult ? {
+      tool_call_id: msg.toolCall?.id,
+      name: msg.toolCall?.name,
+      content: JSON.stringify(msg.toolResult)
+    } : {})
   }));
 };
 
@@ -187,7 +206,8 @@ export const getStreamingAIResponse = async (
           actionData = {
             actionId: matchedTool.actionId,
             name: toolCall.function.name,
-            parameters: parameters
+            parameters: parameters,
+            id: toolCall.id || `call_${Date.now()}`
           };
         }
       }
@@ -235,15 +255,43 @@ export const getToolExecutionResponse = async (
     // Format previous messages for the backend
     const formattedPreviousMessages = formatMessagesForBackend(previousMessages);
 
-    // Create the message about the tool execution
-    const toolMessage = `I've executed the "${toolName}" tool and here is the result: ${JSON.stringify(toolResult)}. 
-Please provide a human-friendly interpretation of this result.`;
+    // Find the last tool call message to get its ID
+    const lastToolCallMessage = [...previousMessages].reverse().find(msg => msg.toolCall?.name === toolName);
+    const toolCallId = lastToolCallMessage?.toolCall?.id || `call_${Date.now()}`;
 
-    // Create messages array including the tool result message
+    // Create the tool result message
+    const toolResultMessage = {
+      role: 'assistant' as const,
+      content: null,
+      tool_calls: [{
+        id: toolCallId,
+        type: 'function',
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(lastToolCallMessage?.toolCall?.parameters || {})
+        }
+      }]
+    };
+
+    // Create the tool response message
+    const toolResponseMessage = {
+      role: 'tool' as const,
+      tool_call_id: toolCallId,
+      name: toolName,
+      content: JSON.stringify(toolResult)
+    };
+
+    // Create messages array including the tool call and result
     const messages = [
       { role: 'system' as const, content: SYSTEM_PROMPT },
       ...formattedPreviousMessages,
-      { role: 'user' as const, content: toolMessage }
+      toolResultMessage,
+      toolResponseMessage,
+      // Add a user message asking for interpretation
+      { 
+        role: 'user' as const, 
+        content: `I've executed the "${toolName}" tool. Can you interpret the results and tell me what to do next?` 
+      }
     ];
 
     // Call the backend API
@@ -263,7 +311,8 @@ Please provide a human-friendly interpretation of this result.`;
           actionData = {
             actionId: matchedTool.actionId,
             name: toolCall.function.name,
-            parameters: parameters
+            parameters: parameters,
+            id: toolCall.id || `call_${Date.now()}`
           };
         }
       }
@@ -271,7 +320,7 @@ Please provide a human-friendly interpretation of this result.`;
 
     // Prepare the final response object
     let responseObj: AIResponse = {
-      response: responseText || 'Action completed.', // Provide a default if no text
+      response: responseText || 'Action completed.',
       action: actionData
     };
 

@@ -9,6 +9,11 @@ export interface Message {
   actionData?: any;
   executionId?: string;
   toolResult?: any;
+  toolCall?: {
+    id?: string;
+    name: string;
+    parameters: any;
+  };
 }
 
 export interface Conversation {
