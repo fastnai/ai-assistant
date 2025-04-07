@@ -15,6 +15,11 @@ const dateTime = new Date().toLocaleString();
 // Define system prompt
 const SYSTEM_PROMPT = `You are an AI assistant specialized in executing tools and functions to fulfill user requests.
 
+**User Friendly Instructions:**
+- You are a helpful assistant that can help with a wide range of tasks.
+- You can use tools to help you complete tasks.
+- You can do greetings be friendly and ask user what they want to do.
+
 **CRITICAL EXECUTION DIRECTIVES:**
 - You MUST ALWAYS check ALL available tools before claiming you cannot perform a task
 - If you have ANY tool that relates to the user's request, you MUST use it
@@ -290,12 +295,21 @@ export const getToolExecutionResponse = async (
       // Add a user message asking for interpretation
       { 
         role: 'user' as const, 
-        content: `I've executed the "${toolName}" tool. Can you interpret the results and tell me what to do next?` 
+        content: `I've executed the "${toolName}" tool. Please interpret the results and tell me what to do next.` 
       }
     ];
 
+    // Log conversation for debugging
+    console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
+
     // Call the backend API
     const backendResponse = await callBackendAPI(messages, availableTools);
+
+    // Handle error response
+    if (!backendResponse || backendResponse.error) {
+      console.error('Error from backend API:', backendResponse?.error || 'No response');
+      throw new Error(backendResponse?.error?.message || 'Failed to get response from backend');
+    }
 
     // Extract content and potential tool calls
     const responseText = backendResponse?.choices?.[0]?.message?.content || '';
@@ -307,13 +321,18 @@ export const getToolExecutionResponse = async (
       if (toolCall && toolCall.function) {
         const matchedTool = availableTools.find(tool => tool.function.name === toolCall.function.name);
         if (matchedTool) {
-          const parameters = JSON.parse(toolCall.function.arguments || '{}');
-          actionData = {
-            actionId: matchedTool.actionId,
-            name: toolCall.function.name,
-            parameters: parameters,
-            id: toolCall.id || `call_${Date.now()}`
-          };
+          try {
+            const parameters = JSON.parse(toolCall.function.arguments || '{}');
+            actionData = {
+              actionId: matchedTool.actionId,
+              name: toolCall.function.name,
+              parameters: parameters,
+              id: toolCall.id || `call_${Date.now()}`
+            };
+          } catch (e) {
+            console.error('Error parsing tool arguments:', e);
+            // Continue without action if parsing fails
+          }
         }
       }
     }
@@ -338,7 +357,7 @@ export const getToolExecutionResponse = async (
   } catch (error) {
     console.error('Error interpreting tool execution result via backend:', error);
     const errorResponse: AIResponse = {
-      response: 'Sorry, I encountered an error processing the tool result.',
+      response: 'Sorry, I encountered an error processing the tool result. Please try again.',
       action: null
     };
     if (onChunk) {
@@ -347,6 +366,6 @@ export const getToolExecutionResponse = async (
     if (onComplete) {
       onComplete(errorResponse);
     }
-    throw error; // Re-throw for further handling if needed
+    return errorResponse; // Return error response instead of throwing
   }
 };

@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { Message } from '../types';
 import { PlayCircle, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import type { Components } from 'react-markdown';
 
 interface ChatMessageProps {
   message: Message;
@@ -38,6 +42,65 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   // Determine if we should show the Run Tool button
   const showRunToolButton = !isUser && message.hasAction && message.actionData && !toolResults;
 
+  // Define markdown components with proper typing
+  const markdownComponents: Components = {
+    code({ className, children, ...props }: any) {
+      // The inline prop comes from MDX which isn't used here, but we need to check
+      // if there's a language specified in the className
+      const match = /language-(\w+)/.exec(className || '');
+      const inline = !match;
+      
+      return !inline ? (
+        <pre className="bg-gray-800 rounded-md p-2 my-2 overflow-x-auto">
+          <code
+            className={`text-sm ${match ? `language-${match[1]}` : ''} text-green-400`}
+            {...props}
+          >
+            {children}
+          </code>
+        </pre>
+      ) : (
+        <code
+          className={`px-1 py-0.5 bg-gray-200 rounded-sm text-sm ${isUser ? 'text-blue-900' : 'text-blue-700'}`}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+    table({ ...props }) {
+      return (
+        <div className="overflow-x-auto my-3">
+          <table className="border-collapse border border-gray-300" {...props} />
+        </div>
+      );
+    },
+    thead({ ...props }) {
+      return <thead className="bg-gray-200" {...props} />;
+    },
+    th({ ...props }) {
+      return <th className="border border-gray-300 px-4 py-2 text-left" {...props} />;
+    },
+    td({ ...props }) {
+      return <td className="border border-gray-300 px-4 py-2" {...props} />;
+    },
+    a({ ...props }) {
+      return <a className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />;
+    },
+    ul({ ...props }) {
+      return <ul className="list-disc pl-6 my-2" {...props} />;
+    },
+    ol({ ...props }) {
+      return <ol className="list-decimal pl-6 my-2" {...props} />;
+    },
+    blockquote({ ...props }) {
+      return <blockquote className="border-l-4 border-gray-300 pl-4 py-1 my-2 italic" {...props} />;
+    },
+    img({ ...props }) {
+      return <img className="max-w-full h-auto rounded-md my-2" {...props} />;
+    }
+  };
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
@@ -63,7 +126,20 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           )}
         </div>
 
-        <div className="whitespace-pre-wrap">{message.content}</div>
+        {/* Render content as markdown for non-user messages, plain text for user */}
+        <div className={`markdown-content ${isUser ? 'text-white' : 'text-gray-800'}`}>
+          {isUser ? (
+            <div className="whitespace-pre-wrap">{message.content}</div>
+          ) : (
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]} 
+              rehypePlugins={[rehypeRaw]}
+              components={markdownComponents}
+            >
+              {message.content}
+            </ReactMarkdown>
+          )}
+        </div>
         
         {/* Run Tool button when action is available */}
         {showRunToolButton && (
