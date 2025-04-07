@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './gemini';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2 } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint } from 'lucide-react';
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -21,6 +21,10 @@ function App() {
   const [toolResults, setToolResults] = useState<Record<string, any>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // State for API Key and Space ID, loaded from localStorage
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('fastnApiKey') || '');
+  const [spaceId, setSpaceId] = useState<string>(() => localStorage.getItem('fastnSpaceId') || '');
+
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -31,11 +35,26 @@ function App() {
     localStorage.setItem('conversation', JSON.stringify(conversation));
   }, [conversation]);
 
+  // Save credentials to localStorage
+  useEffect(() => {
+    localStorage.setItem('fastnApiKey', apiKey);
+  }, [apiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnSpaceId', spaceId);
+  }, [spaceId]);
+
   const loadTools = async () => {
+    if (!apiKey || !spaceId) {
+      setError('API Key and Space ID are required to load tools.');
+      setAvailableTools([]); // Clear tools if credentials missing
+      return;
+    }
     try {
       setIsRefreshing(true);
       setError(null);
-      const tools = await getTools('chat');
+      // Pass apiKey and spaceId to getTools
+      const tools = await getTools('chat', apiKey, spaceId);
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
@@ -80,6 +99,11 @@ function App() {
   };
 
   const handleSendMessage = async (message: string) => {
+    if (!apiKey || !spaceId) {
+      setError('API Key and Space ID are required before sending messages.');
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     addMessage('user', message);
@@ -177,89 +201,106 @@ function App() {
   };
 
   const handleExecuteTool = async (actionData: any) => {
-    if (!actionData || !actionData.actionId) {
-      setError("Invalid tool action data");
+    if (!apiKey || !spaceId) {
+        setError('API Key and Space ID are required to execute tools.');
+        setIsLoading(false);
+        return;
+    }
+    
+    if (!actionData) {
+      setError("Invalid tool action data - no action data provided");
       return;
     }
     
-    // Identify which tool we're executing
+    // Extract tool name from function name (removing prefixes)
     const toolName = actionData.name?.replace('mcp_fastn_', '') || 
                     (actionData.actionId && actionData.actionId.split('_').pop()) || 
                     'tool';
-    
+
     console.log('Executing tool:', toolName, actionData);
-    
-    // Store which message triggered this action
-    const sourceMessageId = conversation.messages.find(
-      msg => msg.actionData && 
-      msg.actionData.actionId === actionData.actionId
-    )?.id;
-    
-    // If we couldn't find the source message, use the last assistant message
-    const messageId = sourceMessageId || `temp-${Date.now()}`;
-    
+
+    // Find the message that contains this actionData to link the result later
+    const sourceMessage = conversation.messages.find(
+        msg => msg.actionData && msg.actionData === actionData // Compare objects directly if possible
+    );
+    const messageId = sourceMessage?.id || `exec-${Date.now()}`; // Use message ID or a temporary one
+
     setIsLoading(true);
     setError(null);
     try {
-      // Add a notification that we're executing the tool
-      addMessage('assistant', `Executing ${toolName}...`, { isToolExecution: true });
-      
-      // Execute the tool with the provided actionId and parameters
+      // Update the existing message to show we're executing the tool
+      // Instead of adding a new message, we'll just update the existing one
+      if (sourceMessage) {
+        setConversation(prev => ({
+          messages: prev.messages.map(msg => 
+            msg.id === messageId 
+              ? { ...msg, content: `Executing ${toolName}...`, isToolExecution: true, executionId: messageId }
+              : msg
+          )
+        }));
+      } else {
+        // If no source message found, add a new one
+        addMessage('assistant', `Executing ${toolName}...`, { isToolExecution: true, executionId: messageId });
+      }
+
+      // For the new endpoint format, we need to pass just the parameters directly
+      // The API function will find the right tool and endpoint based on actionId
       const response = await executeTool(
         actionData.actionId, 
-        actionData.parameters
+        actionData.parameters || {}, // Ensure parameters is at least an empty object
+        apiKey,             
+        spaceId,            
+        availableTools      
       );
-      
-      // Store the raw response for debugging
+
       console.log('Tool execution response:', response);
-      
-      // Store the result to show in the UI
+
+      // Store the result linked to the executionId
       setToolResults(prev => ({
         ...prev,
         [messageId]: response
       }));
-      
-      // Prepare conversation history with tool results included
-      const contextWithToolResults = prepareContextForLLM([
-        ...conversation.messages,
-        // Add a virtual system message with tool execution info for context
+
+      // Find the 'Executing...' message and update it
+      setConversation(prev => {
+        const messages = prev.messages.map(msg => 
+          msg.executionId === messageId || msg.id === messageId
+            ? { ...msg, content: `${toolName} executed.`, isToolExecution: false, toolResult: response } 
+            : msg
+        );
+        return { ...prev, messages };
+      });
+
+      // Prepare context for the next AI call, including the execution result
+      const contextWithExecutionResult = prepareContextForLLM([
+        ...conversation.messages, 
+        // Add a representation of the tool execution for the LLM context
         {
-          id: `system-${Date.now()}`,
-          role: 'assistant',
-          content: `Tool "${toolName}" was executed with parameters: ${JSON.stringify(actionData.parameters)} and returned: ${JSON.stringify(response)}`,
-          timestamp: Date.now()
+            id: `system-${messageId}`,
+            role: 'assistant', 
+            content: `[Tool Execution Result for ${toolName}]
+Parameters: ${JSON.stringify(actionData.parameters || {})}
+Result: ${JSON.stringify(response)}`,
+            timestamp: Date.now(),
         }
       ]);
-      
-      // Create a temporary streaming message
-      const tempId = `temp-${Date.now()}`;
-      setConversation(prev => ({
-        messages: [
-          ...prev.messages,
-          {
-            id: tempId,
-            role: 'assistant',
-            content: '',
-            timestamp: Date.now(),
-            isStreaming: true,
-          },
-        ],
-      }));
-      
-      // Get AI response for the tool execution result with streaming
+
+      // Instead of creating a new message, we'll continue updating the existing one
       getToolExecutionResponse(
         actionData.name || toolName,
         response,
-        contextWithToolResults,
+        contextWithExecutionResult,
         availableTools,
         (text) => {
           // Update the streaming text
           setStreamingText(text);
           
-          // Update the temporary message
+          // Update the existing message
           setConversation(prev => ({
             messages: prev.messages.map(msg => 
-              msg.id === tempId ? { ...msg, content: text } : msg
+              (msg.executionId === messageId || msg.id === messageId)
+                ? { ...msg, content: text, isStreaming: true }
+                : msg
             ),
           }));
         },
@@ -267,18 +308,26 @@ function App() {
           // When streaming is complete, finalize the message
           setConversation(prev => ({
             messages: prev.messages.map(msg =>
-              msg.id === tempId ? { 
-                ...msg, 
-                content: aiResponse.response,
-                isStreaming: false,
-                hasAction: !!aiResponse.action,
-                actionData: aiResponse.action
-              } : msg
+              (msg.executionId === messageId || msg.id === messageId)
+                ? { 
+                    ...msg, 
+                    content: aiResponse.response,
+                    isStreaming: false,
+                    hasAction: !!aiResponse.action,
+                    actionData: aiResponse.action
+                  }
+                : msg
             ),
           }));
           
-          // Clear current action
-          setCurrentJson(null);
+          // If the AI suggests another action based on the tool result
+          if (aiResponse.action) {
+            console.log('Follow-up action detected:', aiResponse.action);
+            setCurrentJson(aiResponse.action);
+          } else {
+            // Clear any previous action
+            setCurrentJson(null);
+          }
           
           setIsLoading(false);
           setStreamingText('');
@@ -287,14 +336,16 @@ function App() {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         setError(errorMessage);
         
-        // Update the temporary message to show the error
+        // Update the existing message to show the error
         setConversation(prev => ({
           messages: prev.messages.map(msg =>
-            msg.id === tempId ? { 
-              ...msg, 
-              content: `Error: ${errorMessage}`,
-              isStreaming: false 
-            } : msg
+            (msg.executionId === messageId || msg.id === messageId)
+              ? { 
+                  ...msg, 
+                  content: `Error: ${errorMessage}`,
+                  isStreaming: false 
+                }
+              : msg
           ),
         }));
         
@@ -304,7 +355,20 @@ function App() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       setError(errorMessage);
-      addMessage('assistant', `Error executing tool: ${errorMessage}`);
+      
+      // Update the existing message with the error
+      setConversation(prev => ({
+        messages: prev.messages.map(msg =>
+          (msg.executionId === messageId || msg.id === messageId)
+            ? { 
+                ...msg, 
+                content: `Error executing tool: ${errorMessage}`,
+                isStreaming: false 
+              }
+            : msg
+        ),
+      }));
+      
       setIsLoading(false);
     }
   };
@@ -390,44 +454,88 @@ function App() {
 
         {/* Tools Sidebar */}
         {sidebarVisible && (
-          <div className="w-80 bg-white shadow-md p-4 h-[80vh] overflow-y-auto fixed right-0 top-1/2 transform -translate-y-1/2 rounded-l-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Available Tools</h2>
-              <button
-                onClick={loadTools}
-                disabled={isRefreshing}
-                className="p-2 rounded-full hover:bg-gray-100"
-                title="Refresh Tools"
-              >
-                <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-              </button>
+          <div className="w-80 bg-white shadow-md p-4 h-[90vh] overflow-y-auto fixed right-0 top-1/2 transform -translate-y-1/2 rounded-l-lg flex flex-col">
+            {/* Credentials Section */}
+            <div className="mb-6 border-b pb-4">
+              <h2 className="text-xl font-bold mb-3">Credentials</h2>
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
+                  </label>
+                  <input
+                    type="password" // Use password type for keys
+                    id="apiKey"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Enter your API Key"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                    <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
+                  </label>
+                  <input
+                    type="text"
+                    id="spaceId"
+                    value={spaceId}
+                    onChange={(e) => setSpaceId(e.target.value)}
+                    placeholder="Enter your Space ID"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  />
+                </div>
+              </div>
+               {/* Add a visual cue if credentials are missing */}
+               {(!apiKey || !spaceId) && (
+                 <p className="text-xs text-red-600 mt-2">Credentials are required to load and use tools.</p>
+               )}
             </div>
-            
-            {availableTools.length > 0 ? (
-              <div className="space-y-4 overflow-y-auto">
-                {availableTools.map((tool: Tool, index: number) => (
-                  <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Wrench className="w-5 h-5 text-blue-500" />
-                      <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
+
+            {/* Available Tools Section */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="text-xl font-bold">Available Tools</h2>
+                <button
+                  onClick={loadTools}
+                  disabled={isRefreshing || !apiKey || !spaceId} // Disable if refreshing or no credentials
+                  className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={!apiKey || !spaceId ? "Enter Credentials to Load Tools" : "Refresh Tools"}
+                >
+                  <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+              
+              {(!apiKey || !spaceId) ? (
+                <div className="flex items-center justify-center h-20">
+                   <p className="text-gray-500 text-center text-sm px-4">Enter API Key and Space ID above to load tools.</p>
+                </div>
+              ) : availableTools.length > 0 ? (
+                <div className="space-y-3">
+                  {availableTools.map((tool: Tool, index: number) => (
+                    <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Wrench className="w-5 h-5 text-blue-500" />
+                        <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
+                      </div>
+                      <p className="text-sm text-gray-600 pl-7">{
+                        tool.function.description
+                          .split('. ')[0]
+                          .replace("This tool is designed to execute the ", "")
+                          .replace(" operation on the ", " - ")
+                          .replace(" platform", "")
+                      }</p>
                     </div>
-                    <p className="text-sm text-gray-600 pl-7">{
-                      tool.function.description
-                        .split('. ')[0]
-                        .replace("This tool is designed to execute the ", "")
-                        .replace(" operation on the ", " - ")
-                        .replace(" platform", "")
-                    }</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-40">
-                <p className="text-gray-500">
-                  {isRefreshing ? 'Loading tools...' : 'No tools available'}
-                </p>
-              </div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-20">
+                  <p className="text-gray-500 text-sm">
+                    {isRefreshing ? 'Loading tools...' : 'No tools available or failed to load.'}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

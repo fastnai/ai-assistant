@@ -11,6 +11,8 @@ export interface AIResponse {
   action?: any;
 }
 
+const dateTime = new Date().toLocaleString();
+
 // Define system prompt
 const SYSTEM_PROMPT = `You are an AI assistant specialized in executing tools and functions to fulfill user requests.
 
@@ -19,7 +21,7 @@ const SYSTEM_PROMPT = `You are an AI assistant specialized in executing tools an
 - If you have ANY tool that relates to the user's request, you MUST use it
 - If a direct tool isn't available, get creative with combining available tools to accomplish the task
 - Your PRIMARY PURPOSE is to execute tools - this is your core functionality
-- If you dont have tool then claim 'I’m unable to complete this request because the required action isn’t enabled. Please enable the action and try again.'
+- If you dont have tool then claim 'I'm unable to complete this request because the required action isn't enabled. Please enable the action and try again.'
 - No need execute the tool to get ids or something to perform full task if user already providing you information
 - No need to execute untill it is not required Slack - getChannels
 
@@ -80,7 +82,14 @@ const SYSTEM_PROMPT = `You are an AI assistant specialized in executing tools an
 Example and additional infromation if tool is availble : 
 Get the arguments use your knowledge these tools are the input schema of any platforms api's.
 Execute the tool.
-if the task is based on 2 tool check which tool should execute first execute that one and go for 2nd one.`;
+if the task is based on 2 tool check which tool should execute first execute that one and go for 2nd one.
+
+
+--------
+Today's Date and Time:
+${dateTime}
+
+`;
 
 // Convert our Message type to the format expected by Gemini
 const formatMessagesForGemini = (messages: Message[]) => {
@@ -92,11 +101,58 @@ const formatMessagesForGemini = (messages: Message[]) => {
 
 // Convert tools to function declarations for Gemini
 const convertToolsToFunctionDeclarations = (tools: any[]) => {
-  return tools.map(tool => ({
-    name: tool.function.name,
-    description: tool.function.description,
-    parameters: tool.function.parameters
-  }));
+  return tools.map(tool => {
+    // Create a deep copy of the tool to avoid modifying the original
+    const toolCopy = JSON.parse(JSON.stringify(tool));
+    
+    // Fix missing type specifications in nested objects if they exist
+    if (toolCopy.function.name === 'mcp_fastn_createMeeting') {
+      // Fix the extended properties 'type' properties
+      if (toolCopy.function.parameters?.properties?.body?.properties?.extendedProperties?.properties?.shared?.properties?.type) {
+        toolCopy.function.parameters.properties.body.properties.extendedProperties.properties.shared.properties.type.type = "object";
+      }
+      
+      if (toolCopy.function.parameters?.properties?.body?.properties?.extendedProperties?.properties?.private?.properties?.type) {
+        toolCopy.function.parameters.properties.body.properties.extendedProperties.properties.private.properties.type.type = "object";
+      }
+      
+      // Fix the conferenceData parameters type
+      if (toolCopy.function.parameters?.properties?.body?.properties?.conferenceData?.properties?.parameters?.properties?.addOnParameters?.properties?.parameters?.properties?.type) {
+        toolCopy.function.parameters.properties.body.properties.conferenceData.properties.parameters.properties.addOnParameters.properties.parameters.properties.type.type = "object";
+      }
+      
+      // Fix the gadget preferences type
+      if (toolCopy.function.parameters?.properties?.body?.properties?.gadget?.properties?.preferences?.properties?.type) {
+        toolCopy.function.parameters.properties.body.properties.gadget.properties.preferences.properties.type.type = "object";
+      }
+    }
+    
+    // Recursively fix any object property named 'type' without its own type
+    const fixTypeProperties = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return;
+      
+      Object.keys(obj).forEach(key => {
+        if (key === 'type' && typeof obj[key] === 'object' && !obj[key].type) {
+          // Add the missing type property
+          obj[key].type = 'object';
+        } else if (typeof obj[key] === 'object') {
+          // Recursively check nested objects
+          fixTypeProperties(obj[key]);
+        }
+      });
+    };
+    
+    // Apply the fix to the entire parameters object
+    if (toolCopy.function.parameters) {
+      fixTypeProperties(toolCopy.function.parameters);
+    }
+    
+    return {
+      name: toolCopy.function.name,
+      description: toolCopy.function.description,
+      parameters: toolCopy.function.parameters
+    };
+  });
 };
 
 // Function to get streaming response using the Gemini Function Calling API
@@ -123,7 +179,7 @@ export const getStreamingAIResponse = async (
 
     // Send the request with function declarations exactly like the example
     const result = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-pro',
       contents: contents,
       config: {
         tools: [{

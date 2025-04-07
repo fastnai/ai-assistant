@@ -7,6 +7,8 @@ export interface Message {
   isToolExecution?: boolean;
   hasAction?: boolean;
   actionData?: any;
+  executionId?: string;
+  toolResult?: any;
 }
 
 export interface Conversation {
