@@ -1,13 +1,9 @@
-import { OpenAI } from "openai";
 import { Message } from './types';
 
-// Initialize the OpenAI client with your API key
-// Use import.meta.env for Vite environment variables
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
-const openai = new OpenAI({ 
-  apiKey: OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true // Allow browser usage with appropriate warnings
-});
+// Backend API Configuration
+const FASTN_API_URL = 'https://live.fastn.ai/api/v1/chatGPT';
+const FASTN_API_KEY = '4f657c13-0f37-4278-90c2-19bc64d0d79a';
+const FASTN_SPACE_ID = 'a964a451-7538-4e34-ac6c-693a2f087fe4';
 
 export interface AIResponse {
   response: string;
@@ -94,15 +90,59 @@ ${dateTime}
 
 `;
 
-// Convert our Message type to the format expected by OpenAI
-const formatMessagesForOpenAI = (messages: Message[]) => {
+// Convert our Message type to the format expected by the backend API (similar to OpenAI)
+const formatMessagesForBackend = (messages: Message[]) => {
   return messages.map(msg => ({
     role: msg.role as 'user' | 'assistant' | 'system',
     content: msg.content
   }));
 };
 
-// Function to get streaming response using the OpenAI Function Calling API
+// Helper function to simulate streaming for the UI
+const simulateStreaming = async (text: string, onChunk: (text: string) => void) => {
+  const words = text.split(' ');
+  let currentText = '';
+  for (const word of words) {
+    currentText += word + ' ';
+    onChunk(currentText);
+    await new Promise(resolve => setTimeout(resolve, 15)); // Small delay between words
+  }
+};
+
+// Function to call the backend API and get response
+const callBackendAPI = async (messages: any[], tools: any[]) => {
+  const headers = {
+    'x-fastn-api-key': FASTN_API_KEY,
+    'Content-Type': 'application/json',
+    'x-fastn-space-id': FASTN_SPACE_ID,
+    'stage': 'LIVE'
+    // Add 'x-fastn-space-tenantid' if needed
+  };
+
+  const body = JSON.stringify({
+    input: {
+      messages,
+      tools
+    }
+  });
+
+  const response = await fetch(FASTN_API_URL, {
+    method: 'POST',
+    headers,
+    body
+  });
+
+  if (!response.ok) {
+    const errorData = await response.text();
+    throw new Error(`Backend API request failed with status ${response.status}: ${errorData}`);
+  }
+
+  const data = await response.json();
+  // Assuming the backend response mirrors OpenAI structure
+  return data; 
+};
+
+// Function to get streaming response using the backend API
 export const getStreamingAIResponse = async (
   message: string,
   availableTools: any[],
@@ -111,8 +151,8 @@ export const getStreamingAIResponse = async (
   onComplete: (response: AIResponse) => void
 ) => {
   try {
-    // Format previous messages for OpenAI
-    const formattedPreviousMessages = formatMessagesForOpenAI(previousMessages);
+    // Format previous messages for the backend
+    const formattedPreviousMessages = formatMessagesForBackend(previousMessages);
     
     // Create messages array with system prompt, previous messages and current message
     const messages = [
@@ -121,138 +161,17 @@ export const getStreamingAIResponse = async (
       { role: 'user' as const, content: message }
     ];
 
-    let responseText = '';
+    // Call the backend API
+    const backendResponse = await callBackendAPI(messages, availableTools);
+
+    // Extract content and potential tool calls (assuming OpenAI-like structure)
+    const responseText = backendResponse?.choices?.[0]?.message?.content || '';
+    const toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+    
     let actionData = null;
 
-    // Check if streaming is requested and tools are being used
-    if (availableTools && availableTools.length > 0) {
-      // When tools are involved, we need to make a non-streaming request first
-      // to properly capture tool calls, then simulate streaming for the UI
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: messages,
-        tools: availableTools,
-      });
-      
-      // Extract the response text
-      responseText = completion.choices[0]?.message?.content || '';
-      
-      // Check for tool calls in the response
-      const toolCalls = completion.choices[0]?.message?.tool_calls;
-      
-      if (toolCalls && toolCalls.length > 0) {
-        const toolCall = toolCalls[0]; // Get the first tool call
-        
-        if (toolCall && toolCall.function) {
-          // Find the matching tool from available tools
-          const matchedTool = availableTools.find(tool => 
-            tool.function.name === toolCall.function.name
-          );
-          
-          if (matchedTool) {
-            // Parse the arguments JSON string
-            const parameters = JSON.parse(toolCall.function.arguments || '{}');
-            
-            // Create an action object with the matched tool's actionId
-            actionData = {
-              actionId: matchedTool.actionId,
-              name: toolCall.function.name,
-              parameters: parameters
-            };
-            
-            // Generate a human-friendly response if the model only provided a function call
-            if (!responseText.trim()) {
-              responseText = `I'll help you with ${toolCall.function.name.replace('mcp_fastn_', '')}. Click Run Tool to proceed.`;
-            }
-          }
-        }
-      }
-      
-      // Simulate streaming for UI
-      if (onChunk) {
-        const words = responseText.split(' ');
-        let currentText = '';
-        for (const word of words) {
-          currentText += word + ' ';
-          onChunk(currentText);
-          await new Promise(resolve => setTimeout(resolve, 15));
-        }
-      }
-    } else {
-      // Without tools, we can use streaming directly
-      const stream = await openai.chat.completions.create({
-        model: 'gpt-4-turbo',
-        messages: messages,
-        stream: true,
-      });
-
-      // Handle streaming response
-      for await (const chunk of stream) {
-        if (chunk.choices[0]?.delta?.content) {
-          responseText += chunk.choices[0].delta.content;
-          onChunk(responseText);
-        }
-      }
-    }
-
-    // Prepare response object
-    let responseObj: AIResponse = {
-      response: responseText,
-      action: actionData
-    };
-    
-    // Complete the response
-    onComplete(responseObj);
-    return responseObj;
-  } catch (error) {
-    console.error('Error getting AI response:', error);
-    throw error;
-  }
-};
-
-// Function to get AI response for tool execution results
-export const getToolExecutionResponse = async (
-  toolName: string,
-  toolResult: any,
-  previousMessages: Message[],
-  availableTools: any[],
-  onChunk?: (text: string) => void,
-  onComplete?: (response: AIResponse) => void
-): Promise<AIResponse> => {
-  try {
-    // Format previous messages for OpenAI
-    const formattedPreviousMessages = formatMessagesForOpenAI(previousMessages);
-
-    // Create the message about the tool execution
-    const toolMessage = `I've executed the "${toolName}" tool and here is the result: ${JSON.stringify(toolResult)}. 
-Please provide a human-friendly interpretation of this result.`;
-
-    // Create messages array with system prompt, previous messages and tool result message
-    const messages = [
-      { role: 'system' as const, content: SYSTEM_PROMPT },
-      ...formattedPreviousMessages,
-      { role: 'user' as const, content: toolMessage }
-    ];
-
-    let responseText = '';
-    let actionData = null;
-    
-    // For tool execution results, we need to make a non-streaming request first
-    // to properly capture potential follow-up tool calls
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4-turbo',
-      messages: messages,
-      tools: availableTools,
-    });
-    
-    // Extract the response text
-    responseText = completion.choices[0]?.message?.content || '';
-    
-    // Check for tool calls in the response
-    const toolCalls = completion.choices[0]?.message?.tool_calls;
-    
     if (toolCalls && toolCalls.length > 0) {
-      const toolCall = toolCalls[0]; // Get the first tool call
+      const toolCall = toolCalls[0]; // Assuming one tool call for now
       
       if (toolCall && toolCall.function) {
         // Find the matching tool from available tools
@@ -273,24 +192,94 @@ Please provide a human-friendly interpretation of this result.`;
         }
       }
     }
-    
-    // Simulate streaming for UI if requested
-    if (onChunk) {
-      const words = responseText.split(' ');
-      let currentText = '';
-      for (const word of words) {
-        currentText += word + ' ';
-        onChunk(currentText);
-        await new Promise(resolve => setTimeout(resolve, 15));
-      }
-    }
-    
-    // Prepare response
+
+    // Prepare the final response object
     let responseObj: AIResponse = {
-      response: responseText,
+      response: responseText || (actionData ? `I'll help you with ${actionData.name.replace('mcp_fastn_', '')}. Click Run Tool to proceed.` : 'Something went wrong.'),
       action: actionData
     };
+
+    // Simulate streaming for the UI
+    if (onChunk && responseObj.response) {
+      await simulateStreaming(responseObj.response, onChunk);
+    }
     
+    // Complete the response
+    onComplete(responseObj);
+    return responseObj;
+  } catch (error) {
+    console.error('Error getting AI response from backend:', error);
+    // Provide a user-friendly error message
+    const errorResponse: AIResponse = {
+      response: 'Sorry, I encountered an error trying to process your request.',
+      action: null
+    };
+    if (onChunk) {
+      await simulateStreaming(errorResponse.response, onChunk);
+    }
+    onComplete(errorResponse);
+    throw error; // Re-throw for further handling if needed
+  }
+};
+
+// Function to get AI response for tool execution results using the backend API
+export const getToolExecutionResponse = async (
+  toolName: string,
+  toolResult: any,
+  previousMessages: Message[],
+  availableTools: any[],
+  onChunk?: (text: string) => void,
+  onComplete?: (response: AIResponse) => void
+): Promise<AIResponse> => {
+  try {
+    // Format previous messages for the backend
+    const formattedPreviousMessages = formatMessagesForBackend(previousMessages);
+
+    // Create the message about the tool execution
+    const toolMessage = `I've executed the "${toolName}" tool and here is the result: ${JSON.stringify(toolResult)}. 
+Please provide a human-friendly interpretation of this result.`;
+
+    // Create messages array including the tool result message
+    const messages = [
+      { role: 'system' as const, content: SYSTEM_PROMPT },
+      ...formattedPreviousMessages,
+      { role: 'user' as const, content: toolMessage }
+    ];
+
+    // Call the backend API
+    const backendResponse = await callBackendAPI(messages, availableTools);
+
+    // Extract content and potential tool calls
+    const responseText = backendResponse?.choices?.[0]?.message?.content || '';
+    const toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+
+    let actionData = null;
+    if (toolCalls && toolCalls.length > 0) {
+      const toolCall = toolCalls[0];
+      if (toolCall && toolCall.function) {
+        const matchedTool = availableTools.find(tool => tool.function.name === toolCall.function.name);
+        if (matchedTool) {
+          const parameters = JSON.parse(toolCall.function.arguments || '{}');
+          actionData = {
+            actionId: matchedTool.actionId,
+            name: toolCall.function.name,
+            parameters: parameters
+          };
+        }
+      }
+    }
+
+    // Prepare the final response object
+    let responseObj: AIResponse = {
+      response: responseText || 'Action completed.', // Provide a default if no text
+      action: actionData
+    };
+
+    // Simulate streaming for the UI if requested
+    if (onChunk && responseObj.response) {
+      await simulateStreaming(responseObj.response, onChunk);
+    }
+
     // Complete the response if callback provided
     if (onComplete) {
       onComplete(responseObj);
@@ -298,7 +287,17 @@ Please provide a human-friendly interpretation of this result.`;
     
     return responseObj;
   } catch (error) {
-    console.error('Error interpreting tool execution result:', error);
-    throw error;
+    console.error('Error interpreting tool execution result via backend:', error);
+    const errorResponse: AIResponse = {
+      response: 'Sorry, I encountered an error processing the tool result.',
+      action: null
+    };
+    if (onChunk) {
+      await simulateStreaming(errorResponse.response, onChunk);
+    }
+    if (onComplete) {
+      onComplete(errorResponse);
+    }
+    throw error; // Re-throw for further handling if needed
   }
 };
