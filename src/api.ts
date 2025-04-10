@@ -17,7 +17,7 @@ export const getTools = async (useCase: string, apiKey: string, spaceId: string)
     return [];
   }
   try {
-    const response = await api.post('/api/mcp/getTools', {
+    const response = await api.post('/api/ucl/getTools', {
       input: {
         useCase,
         spaceId: spaceId,
@@ -36,14 +36,6 @@ export const getTools = async (useCase: string, apiKey: string, spaceId: string)
     }
     throw error;
   }
-};
-
-const getFlowNameFromFunctionName = (functionName: string): string => {
-  const parts = functionName.split('_');
-  if (parts.length >= 3 && parts[0] === 'mcp' && parts[1] === 'fastn') {
-    return parts.slice(2).join('_');
-  }
-  return functionName;
 };
 
 const inferActionId = (parameters: any, tools: Tool[]): string | null => {
@@ -101,7 +93,7 @@ export const executeTool = async (
     
     const toolActionId = tool.actionId;
     
-    const response = await api.post(`/api/mcp/executeTool`, {
+    const response = await api.post(`/api/ucl/executeTool`, {
       input: {
         actionId: toolActionId,
         parameters: parameters
@@ -125,7 +117,7 @@ export const executeTool = async (
           throw new Error('Tool not found for retry');
         }
         
-        const retryResponse = await api.post(`/api/mcp/executeTool`, {
+        const retryResponse = await api.post(`/api/ucl/executeTool`, {
           input: {
             actionId: retryTool.actionId,
             parameters: parameters
