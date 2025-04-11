@@ -1,7 +1,7 @@
 import { Message } from './types';
 
 // Backend API Configuration
-const FASTN_API_URL = 'https://live.fastn.ai/api/v1/chatGPT';
+const FASTN_API_URL = 'https://live.fastn.ai/api/v1/llmCall';
 const FASTN_API_KEY = '4f657c13-0f37-4278-90c2-19bc64d0d79a';
 const FASTN_SPACE_ID = 'a964a451-7538-4e34-ac6c-693a2f087fe4';
 
@@ -133,21 +133,110 @@ const simulateStreaming = async (text: string, onChunk: (text: string) => void) 
   }
 };
 
+// Function to convert tools to Anthropic format
+function convertToolsAnthropicFormat(tools: any[]) {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return [];
+  }
+
+  return tools.map(tool => {
+    if (tool.type === 'function' && tool.function) {
+      const { name, parameters, description } = tool.function;
+
+      // Extract required fields from parameters
+      const requiredFields = parameters.required || [];
+
+      return {
+        "name": name,
+        "description": description,
+        "input_schema": {
+          "type": "object",
+          "properties": parameters.properties || {},  // Preserve the original properties structure
+          "required": requiredFields
+        }
+      };
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+// Function to convert tools to Gemini format
+function convertToolsGeminiFormat(tools: any[]) {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return [];
+  }
+
+  // Convert tools to the format Gemini expects
+  const functionDeclarations = tools.map(tool => {
+    if (tool.type === 'function' && tool.function) {
+      const { name, parameters, description } = tool.function;
+      
+      return {
+        name,
+        description,
+        parameters: {
+          type: parameters.type,
+          properties: parameters.properties || {},
+          required: parameters.required || []
+        }
+      };
+    }
+    return null;
+  }).filter(Boolean);
+
+  // Return in the expected "tools" with "functionDeclarations" format
+  return [
+    {
+      functionDeclarations
+    }
+  ];
+}
+
 // Function to call the backend API and get response
-const callBackendAPI = async (messages: any[], tools: any[]) => {
-  const headers = {
+const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, _tenantId?: string) => {
+  const headers: Record<string, string> = {
     'x-fastn-api-key': FASTN_API_KEY,
     'Content-Type': 'application/json',
     'x-fastn-space-id': FASTN_SPACE_ID,
     'stage': 'LIVE'
-    // Add 'x-fastn-space-tenantid' if needed
   };
 
-  const body = JSON.stringify({
+  // Don't add tenant ID to llmCall API
+
+  // Determine which tool format to use based on model name
+  let formattedTools = tools;
+  const requestBody: any = {
     input: {
       messages,
-      tools
+      tools: formattedTools
     }
+  };
+  
+  // Add modelName only if it's specified - correct format expected by API
+  if (modelName) {
+    // For the API, set the model directly in the root of input
+    requestBody.input.model = modelName;
+    
+    // Check for Anthropic models
+    if (modelName.includes('claude')) {
+      formattedTools = convertToolsAnthropicFormat(tools);
+      requestBody.input.tools = formattedTools;
+    } 
+    // Check for Gemini models
+    else if (modelName.includes('gemini')) {
+      formattedTools = convertToolsGeminiFormat(tools);
+      // For Gemini, the format is different - tools is an array at the top level
+      requestBody.input.tools = formattedTools;
+    }
+    // For OpenAI models (gpt), use the original format
+  }
+
+  const body = JSON.stringify(requestBody);
+
+  console.log('Sending request to LLM API:', {
+    url: FASTN_API_URL,
+    modelName,
+    bodyPreview: { ...requestBody, input: { ...requestBody.input, messages: '[redacted]' } }
   });
 
   const response = await fetch(FASTN_API_URL, {
@@ -158,6 +247,7 @@ const callBackendAPI = async (messages: any[], tools: any[]) => {
 
   if (!response.ok) {
     const errorData = await response.text();
+    console.error('API Error Response:', errorData);
     throw new Error(`Backend API request failed with status ${response.status}: ${errorData}`);
   }
 
@@ -172,7 +262,9 @@ export const getStreamingAIResponse = async (
   availableTools: any[],
   previousMessages: Message[],
   onChunk: (text: string) => void,
-  onComplete: (response: AIResponse) => void
+  onComplete: (response: AIResponse) => void,
+  modelName?: string,
+  tenantId?: string // Keep parameter but don't use it
 ) => {
   try {
     // Format previous messages for the backend
@@ -185,12 +277,50 @@ export const getStreamingAIResponse = async (
       { role: 'user' as const, content: message }
     ];
 
-    // Call the backend API
-    const backendResponse = await callBackendAPI(messages, availableTools);
+    // Call the backend API - pass only modelName, not tenantId
+    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
 
-    // Extract content and potential tool calls (assuming OpenAI-like structure)
-    const responseText = backendResponse?.choices?.[0]?.message?.content || '';
-    const toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+    // Handle different response formats based on model type
+    let responseText = '';
+    let toolCalls = null;
+    
+    // Check if this is a Gemini response format
+    if (backendResponse.candidates && backendResponse.modelVersion?.includes('gemini')) {
+      // Gemini format
+      console.log('Processing Gemini response:', backendResponse);
+      const candidate = backendResponse.candidates[0];
+      if (candidate?.content?.parts?.length > 0) {
+        const part = candidate.content.parts[0];
+        
+        // Check if this is a function call or text response
+        if (part.text) {
+          responseText = part.text;
+        } else if (part.functionCall) {
+          // Handle Gemini function call format
+          console.log('Detected Gemini function call:', part.functionCall);
+          
+          // Store as null for text since this is a function call
+          responseText = '';
+          
+          // Create a tool call array in a format similar to OpenAI's for consistent processing
+          toolCalls = [{
+            id: `gemini_call_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: part.functionCall.name,
+              // Convert args object to JSON string to match OpenAI format
+              arguments: JSON.stringify(part.functionCall.args || {})
+            }
+          }];
+          
+          console.log('Converted Gemini function call to OpenAI format:', toolCalls);
+        }
+      }
+    } else {
+      // Assume OpenAI/default format
+      responseText = backendResponse?.choices?.[0]?.message?.content || '';
+      toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+    }
     
     let actionData = null;
 
@@ -254,7 +384,9 @@ export const getToolExecutionResponse = async (
   previousMessages: Message[],
   availableTools: any[],
   onChunk?: (text: string) => void,
-  onComplete?: (response: AIResponse) => void
+  onComplete?: (response: AIResponse) => void,
+  modelName?: string,
+  tenantId?: string
 ): Promise<AIResponse> => {
   try {
     // Format previous messages for the backend
@@ -302,8 +434,8 @@ export const getToolExecutionResponse = async (
     // Log conversation for debugging
     console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
 
-    // Call the backend API
-    const backendResponse = await callBackendAPI(messages, availableTools);
+    // Call the backend API - pass only modelName, not tenantId
+    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
 
     // Handle error response
     if (!backendResponse || backendResponse.error) {
@@ -311,9 +443,47 @@ export const getToolExecutionResponse = async (
       throw new Error(backendResponse?.error?.message || 'Failed to get response from backend');
     }
 
-    // Extract content and potential tool calls
-    const responseText = backendResponse?.choices?.[0]?.message?.content || '';
-    const toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+    // Handle different response formats based on model type
+    let responseText = '';
+    let toolCalls = null;
+    
+    // Check if this is a Gemini response format
+    if (backendResponse.candidates && backendResponse.modelVersion?.includes('gemini')) {
+      // Gemini format
+      console.log('Processing Gemini response:', backendResponse);
+      const candidate = backendResponse.candidates[0];
+      if (candidate?.content?.parts?.length > 0) {
+        const part = candidate.content.parts[0];
+        
+        // Check if this is a function call or text response
+        if (part.text) {
+          responseText = part.text;
+        } else if (part.functionCall) {
+          // Handle Gemini function call format
+          console.log('Detected Gemini function call:', part.functionCall);
+          
+          // Store as null for text since this is a function call
+          responseText = '';
+          
+          // Create a tool call array in a format similar to OpenAI's for consistent processing
+          toolCalls = [{
+            id: `gemini_call_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: part.functionCall.name,
+              // Convert args object to JSON string to match OpenAI format
+              arguments: JSON.stringify(part.functionCall.args || {})
+            }
+          }];
+          
+          console.log('Converted Gemini function call to OpenAI format:', toolCalls);
+        }
+      }
+    } else {
+      // Assume OpenAI/default format
+      responseText = backendResponse?.choices?.[0]?.message?.content || '';
+      toolCalls = backendResponse?.choices?.[0]?.message?.tool_calls;
+    }
 
     let actionData = null;
     if (toolCalls && toolCalls.length > 0) {
@@ -357,7 +527,7 @@ export const getToolExecutionResponse = async (
   } catch (error) {
     console.error('Error interpreting tool execution result via backend:', error);
     const errorResponse: AIResponse = {
-      response: 'Sorry, I encountered an error processing the tool result. Please try again.',
+      response: 'Sorry, I encountered an error trying to process the tool execution result.',
       action: null
     };
     if (onChunk) {
@@ -366,6 +536,6 @@ export const getToolExecutionResponse = async (
     if (onComplete) {
       onComplete(errorResponse);
     }
-    return errorResponse; // Return error response instead of throwing
+    return errorResponse;
   }
 };

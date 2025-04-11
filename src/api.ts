@@ -70,7 +70,8 @@ export const executeTool = async (
   parameters: Record<string, any>,
   apiKey: string,
   spaceId: string,
-  availableTools: Tool[]
+  availableTools: Tool[],
+  tenantId?: string
 ) => {
   if (!apiKey || !spaceId) {
     throw new Error('API Key or Space ID is missing. Cannot execute tool.');
@@ -93,16 +94,24 @@ export const executeTool = async (
     
     const toolActionId = tool.actionId;
     
+    // Prepare headers with optional tenant ID
+    const headers: Record<string, string> = {
+      'x-fastn-api-key': apiKey,
+      'x-fastn-space-id': spaceId,
+    };
+    
+    // Add tenant ID to headers if provided
+    if (tenantId) {
+      headers['x-fastn-space-tenantid'] = tenantId;
+    }
+    
     const response = await api.post(`/api/ucl/executeTool`, {
       input: {
         actionId: toolActionId,
         parameters: parameters
       }
     }, {
-      headers: {
-        'x-fastn-api-key': apiKey,
-        'x-fastn-space-id': spaceId,
-      }
+      headers
     });
     
     return response.data;
@@ -117,16 +126,24 @@ export const executeTool = async (
           throw new Error('Tool not found for retry');
         }
         
+        // Prepare headers with optional tenant ID for retry
+        const headers: Record<string, string> = {
+          'x-fastn-api-key': apiKey,
+          'x-fastn-space-id': spaceId,
+        };
+        
+        // Add tenant ID to headers if provided
+        if (tenantId) {
+          headers['x-fastn-space-tenantid'] = tenantId;
+        }
+        
         const retryResponse = await api.post(`/api/ucl/executeTool`, {
           input: {
             actionId: retryTool.actionId,
             parameters: parameters
           }
         }, {
-          headers: {
-            'x-fastn-api-key': apiKey,
-            'x-fastn-space-id': spaceId,
-          }
+          headers
         });
         
         return retryResponse.data;

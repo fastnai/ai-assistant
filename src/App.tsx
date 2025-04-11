@@ -3,7 +3,7 @@ import { ChatMessage } from './components/ChatMessage';
 import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
-import { getStreamingAIResponse, getToolExecutionResponse } from './gemini';
+import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
 import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint } from 'lucide-react';
 
 function App() {
@@ -24,6 +24,25 @@ function App() {
   // State for API Key and Space ID, loaded from localStorage
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('fastnApiKey') || '');
   const [spaceId, setSpaceId] = useState<string>(() => localStorage.getItem('fastnSpaceId') || '');
+  // State for model selection, loaded from localStorage
+  const [tenantId, setTenantId] = useState<string>(() => localStorage.getItem('fastnTenantId') || '');
+  const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('fastnSelectedModel') || 'claude-3-7-sonnet-20250219');
+
+  // Available models that support tool calls
+  const modelsWithToolCalls = [
+    // { name: 'Claude 3.7 Sonnet', id: 'claude-3-7-sonnet-20250219' },
+    // { name: 'Claude 3.5 Sonnet', id: 'claude-3-5-sonnet-20241022' },
+    // { name: 'Claude 3.5 Haiku', id: 'claude-3-5-haiku-20241022' },
+    { name: 'GPT-4o', id: 'gpt-4o' },
+    { name: 'GPT-4o-mini', id: 'gpt-4o-mini' },
+    { name : "O3-mini", id: "o3-mini"},
+    { name: 'GPT-4 Turbo', id: 'gpt-4' },
+    { name: 'GPT-3.5 Turbo', id: 'gpt-3.5-turbo' },
+    { name: 'Gemini 1.5 Pro 001', id: 'gemini-1.5-pro-001' },
+    { name: 'Gemini 1.5 Pro 002', id: 'gemini-1.5-pro-002' },
+    { name: 'Gemini 1.5 Flash 002', id: 'gemini-1.5-flash-002' },
+    { name: 'Gemini 2.0 Flash 001', id: 'gemini-2.0-flash-001' }
+  ];
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -43,6 +62,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem('fastnSpaceId', spaceId);
   }, [spaceId]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnTenantId', tenantId);
+  }, [tenantId]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnSelectedModel', selectedModel);
+  }, [selectedModel]);
 
   const loadTools = async () => {
     if (!apiKey || !spaceId) {
@@ -173,7 +200,8 @@ function App() {
           
           setIsLoading(false);
           setStreamingText('');
-        }
+        },
+        selectedModel
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         setError(errorMessage);
@@ -250,7 +278,8 @@ function App() {
         actionData.parameters || {}, // Ensure parameters is at least an empty object
         apiKey,             
         spaceId,            
-        availableTools      
+        availableTools,
+        tenantId // Pass tenant ID to executeTool      
       );
 
       console.log('Tool execution response:', response);
@@ -331,7 +360,8 @@ Result: ${JSON.stringify(response)}`,
           
           setIsLoading(false);
           setStreamingText('');
-        }
+        },
+        selectedModel
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         setError(errorMessage);
@@ -350,7 +380,6 @@ Result: ${JSON.stringify(response)}`,
         }));
         
         setIsLoading(false);
-        setStreamingText('');
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
@@ -484,6 +513,36 @@ Result: ${JSON.stringify(response)}`,
                     placeholder="Enter your Space ID"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                   />
+                </div>
+                <div>
+                  <label htmlFor="tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
+                  </label>
+                  <input
+                    type="text"
+                    id="tenantId"
+                    value={tenantId}
+                    onChange={(e) => setTenantId(e.target.value)}
+                    placeholder="Enter your Tenant ID"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
+                  </label>
+                  <select
+                    id="selectedModel"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  >
+                    {modelsWithToolCalls.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
                {/* Add a visual cue if credentials are missing */}
