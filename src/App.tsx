@@ -4,7 +4,8 @@ import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
+import FastnWidget from '@fastn-ai/widget-react';
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -27,6 +28,9 @@ function App() {
   // State for model selection, loaded from localStorage
   const [tenantId, setTenantId] = useState<string>(() => localStorage.getItem('fastnTenantId') || '');
   const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('fastnSelectedModel') || 'claude-3-7-sonnet-20250219');
+
+  const [sidebarView, setSidebarView] = useState<'tools' | 'widgets'>('tools');
+  const [configExpanded, setConfigExpanded] = useState(true);
 
   // Available models that support tool calls
   const modelsWithToolCalls = [
@@ -415,188 +419,264 @@ Result: ${JSON.stringify(response)}`,
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100 flex flex-col">
-      <div className="container mx-auto max-w-4xl p-4">
-        <div className="flex flex-col items-center mb-4">
-          <img 
-            src="https://www.shutterstock.com/image-vector/chat-bot-icon-virtual-smart-600nw-2478937553.jpg"
-            alt="AI Agent" 
-            className="w-20 h-20 rounded-full mb-3 shadow-md" 
-          />
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">AI Assistant</h1>
-          <button
-            onClick={clearConversation}
-            className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors mt-2"
-          >
-            <Trash2 className="w-5 h-5" />
-            Clear Chat
-          </button>
-        </div>
-        
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-            {error}
-          </div>
-        )}
-      </div>
-      
-      <div className="flex-1 flex">
-        <div className={`flex-1 container mx-auto ${sidebarVisible ? 'max-w-3xl' : 'max-w-4xl'} p-4 flex flex-col gap-4`}>
-          <div className="bg-white rounded-lg shadow-md p-4 flex-1 overflow-y-auto space-y-4 max-h-[calc(100vh-300px)]">
-            {conversation.messages.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-gray-500">
-                <p>Send a message to start the conversation</p>
-              </div>
-            ) : (
-              conversation.messages.map((message) => (
-                <ChatMessage 
-                  key={message.id} 
-                  message={message}
-                  onExecuteTool={handleExecuteTool}
-                  isLoading={isLoading}
-                  toolResults={message.id in toolResults ? toolResults[message.id] : undefined}
-                />
-              ))
-            )}
-            <div ref={messagesEndRef} />
+    <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
+      {/* Main content area */}
+      <div className="flex h-screen overflow-hidden">
+        {/* Chat area */}
+        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300`}>
+          {/* Header */}
+          <div className="flex flex-col items-center pt-6 pb-4">
+            <img 
+              src="https://www.shutterstock.com/image-vector/chat-bot-icon-virtual-smart-600nw-2478937553.jpg"
+              alt="AI Agent" 
+              className="w-16 h-16 rounded-full mb-3 shadow-md" 
+            />
+            <h1 className="text-2xl font-bold text-gray-800 mb-2">AI Assistant</h1>
+            <button
+              onClick={clearConversation}
+              className="flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear Chat
+            </button>
           </div>
           
-          <div className="sticky bottom-0 bg-white rounded-lg shadow-md p-4">
-            <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
-            {isLoading && !streamingText && (
-              <div className="text-center mt-2 text-sm text-gray-500">
-                <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-blue-500 border-r-transparent align-[-0.125em] mr-2"></div>
-                Processing your request...
-              </div>
-            )}
+          {/* Error message */}
+          {error && (
+            <div className="mx-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+              {error}
+            </div>
+          )}
+          
+          {/* Chat messages */}
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="bg-white rounded-lg shadow-md p-4 h-full overflow-y-auto space-y-4">
+              {conversation.messages.length === 0 ? (
+                <div className="flex items-center justify-center h-32 text-gray-500">
+                  <p>Send a message to start the conversation</p>
+                </div>
+              ) : (
+                conversation.messages.map((message) => (
+                  <ChatMessage 
+                    key={message.id} 
+                    message={message}
+                    onExecuteTool={handleExecuteTool}
+                    isLoading={isLoading}
+                    toolResults={message.id in toolResults ? toolResults[message.id] : undefined}
+                  />
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+          
+          {/* Chat input */}
+          <div className="p-4">
+            <div className="bg-white rounded-lg shadow-md p-4">
+              <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
+              {isLoading && !streamingText && (
+                <div className="text-center mt-2 text-sm text-gray-500">
+                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-blue-500 border-r-transparent align-[-0.125em] mr-2"></div>
+                  Processing your request...
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-0 top-1/2 transform -translate-y-1/2 bg-blue-500 text-white p-2 rounded-l-lg shadow-md hover:bg-blue-600 z-10"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-blue-500 text-white p-2 rounded-l-lg shadow-md hover:bg-blue-600 z-10"
+          style={{ right: sidebarVisible ? '500px' : '0' }}
           title={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
         >
           {sidebarVisible ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
 
         {/* Tools Sidebar */}
-        {sidebarVisible && (
-          <div className="w-80 bg-white shadow-md p-4 h-[90vh] overflow-y-auto fixed right-0 top-1/2 transform -translate-y-1/2 rounded-l-lg flex flex-col">
-            {/* Credentials Section */}
-            <div className="mb-6 border-b pb-4">
-              <h2 className="text-xl font-bold mb-3">Credentials</h2>
-              <div className="space-y-3">
-                <div>
-                  <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
-                  </label>
-                  <input
-                    type="password" // Use password type for keys
-                    id="apiKey"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Enter your API Key"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
-                  </label>
-                  <input
-                    type="text"
-                    id="spaceId"
-                    value={spaceId}
-                    onChange={(e) => setSpaceId(e.target.value)}
-                    placeholder="Enter your Space ID"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
-                  </label>
-                  <input
-                    type="text"
-                    id="tenantId"
-                    value={tenantId}
-                    onChange={(e) => setTenantId(e.target.value)}
-                    placeholder="Enter your Tenant ID"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
-                  </label>
-                  <select
-                    id="selectedModel"
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  >
-                    {modelsWithToolCalls.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-               {/* Add a visual cue if credentials are missing */}
-               {(!apiKey || !spaceId) && (
-                 <p className="text-xs text-red-600 mt-2">Credentials are required to load and use tools.</p>
-               )}
-            </div>
-
-            {/* Available Tools Section */}
-            <div className="flex-1 overflow-y-auto">
-              <div className="flex justify-between items-center mb-3">
-                <h2 className="text-xl font-bold">Available Tools</h2>
-                <button
-                  onClick={loadTools}
-                  disabled={isRefreshing || !apiKey || !spaceId} // Disable if refreshing or no credentials
-                  className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  title={!apiKey || !spaceId ? "Enter Credentials to Load Tools" : "Refresh Tools"}
-                >
-                  <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-                </button>
+        <div 
+          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg ${
+            sidebarVisible ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <div className="h-full overflow-y-auto p-4 flex flex-col">
+            {/* Configuration Section */}
+            <div className="mb-4 border-b pb-2">
+              <div className="flex justify-between items-center cursor-pointer mb-2" onClick={() => setConfigExpanded(!configExpanded)}>
+                <h2 className="text-xl font-bold">Configuration</h2>
+                {configExpanded ? 
+                  <ChevronUp className="w-5 h-5 text-gray-500" /> : 
+                  <ChevronDown className="w-5 h-5 text-gray-500" />
+                }
               </div>
               
-              {(!apiKey || !spaceId) ? (
-                <div className="flex items-center justify-center h-20">
-                   <p className="text-gray-500 text-center text-sm px-4">Enter API Key and Space ID above to load tools.</p>
+              {configExpanded && (
+                <div className="space-y-3 mb-2">
+                  <div>
+                    <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
+                    </label>
+                    <input
+                      type="password"
+                      id="apiKey"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="Enter your API Key"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
+                    </label>
+                    <input
+                      type="text"
+                      id="spaceId"
+                      value={spaceId}
+                      onChange={(e) => setSpaceId(e.target.value)}
+                      placeholder="Enter your Space ID"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
+                    </label>
+                    <input
+                      type="text"
+                      id="tenantId"
+                      value={tenantId}
+                      onChange={(e) => setTenantId(e.target.value)}
+                      placeholder="Enter your Tenant ID"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
+                    </label>
+                    <select
+                      id="selectedModel"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    >
+                      {modelsWithToolCalls.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Add a visual cue if credentials are missing */}
+                  {(!apiKey || !spaceId) && (
+                    <p className="text-xs text-red-600 mt-2">Credentials are required to load and use tools.</p>
+                  )}
                 </div>
-              ) : availableTools.length > 0 ? (
-                <div className="space-y-3">
-                  {availableTools.map((tool: Tool, index: number) => (
-                    <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Wrench className="w-5 h-5 text-blue-500" />
-                        <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
-                      </div>
-                      <p className="text-sm text-gray-600 pl-7">{
-                        tool.function.description
-                          .split('. ')[0]
-                          .replace("This tool is designed to execute the ", "")
-                          .replace(" operation on the ", " - ")
-                          .replace(" platform", "")
-                      }</p>
+              )}
+            </div>
+
+            {/* Toggle between Tools and Widgets */}
+            <div className="flex mb-4 border-b pb-4">
+              <button
+                onClick={() => setSidebarView('widgets')}
+                className={`flex-1 py-2 px-4 rounded-l-lg flex items-center justify-center gap-2 ${
+                  sidebarView === 'widgets' 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                Connector Widgets
+              </button>
+              <button
+                onClick={() => setSidebarView('tools')}
+                className={`flex-1 py-2 px-4 rounded-r-lg flex items-center justify-center gap-2 ${
+                  sidebarView === 'tools' 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Wrench className="w-4 h-4" />
+                Tools
+              </button>
+            </div>
+
+            {/* Content based on selected view */}
+            <div className={`flex-1 overflow-y-auto ${configExpanded ? 'max-h-[calc(100vh-280px)]' : 'max-h-[calc(100vh-130px)]'}`}>
+              {sidebarView === 'tools' ? (
+                <>
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-xl font-bold">Available Tools</h2>
+                    <button
+                      onClick={loadTools}
+                      disabled={isRefreshing || !apiKey || !spaceId}
+                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={!apiKey || !spaceId ? "Enter Credentials to Load Tools" : "Refresh Tools"}
+                    >
+                      <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  
+                  {(!apiKey || !spaceId) ? (
+                    <div className="flex items-center justify-center h-20">
+                      <p className="text-gray-500 text-center text-sm px-4">Enter API Key and Space ID above to load tools.</p>
                     </div>
-                  ))}
-                </div>
+                  ) : availableTools.length > 0 ? (
+                    <div className="space-y-3">
+                      {availableTools.map((tool: Tool, index: number) => (
+                        <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Wrench className="w-5 h-5 text-blue-500" />
+                            <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
+                          </div>
+                          <p className="text-sm text-gray-600 pl-7">{
+                            tool.function.description
+                              .split('. ')[0]
+                              .replace("This tool is designed to execute the ", "")
+                              .replace(" operation on the ", " - ")
+                              .replace(" platform", "")
+                          }</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-20">
+                      <p className="text-gray-500 text-sm">
+                        {isRefreshing ? 'Loading tools...' : 'No tools available or failed to load.'}
+                      </p>
+                    </div>
+                  )}
+                </>
               ) : (
-                <div className="flex items-center justify-center h-20">
-                  <p className="text-gray-500 text-sm">
-                    {isRefreshing ? 'Loading tools...' : 'No tools available or failed to load.'}
-                  </p>
+                <div className={`h-full w-full ${configExpanded ? 'min-h-[500px]' : 'min-h-[600px]'}`}>
+                  {spaceId && tenantId && apiKey ? (
+                    <FastnWidget
+                      projectId={spaceId}
+                      tenantId={tenantId}
+                      apiKey={apiKey}
+                      theme="light"
+                      env="LIVE"
+                      style={{
+                        height: '100%',
+                        width: '100%',
+                        border: 'none',
+                        borderRadius: '8px',
+                      }}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <p className="text-gray-500 text-center text-sm px-4">
+                        Enter Space ID, Tenant ID, and API Key to view available widgets.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
