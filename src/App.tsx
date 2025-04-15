@@ -6,6 +6,7 @@ import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
 import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
+import { useAuth } from "react-oidc-context";
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -31,7 +32,7 @@ function App() {
 
   const [sidebarView, setSidebarView] = useState<'tools' | 'widgets'>('tools');
   const [configExpanded, setConfigExpanded] = useState(true);
-
+  const authToken = useAuth();
   // Available models that support tool calls
   const modelsWithToolCalls = [
     // { name: 'Claude 3.7 Sonnet', id: 'claude-3-7-sonnet-20250219' },
@@ -652,19 +653,33 @@ Result: ${JSON.stringify(response)}`,
               ) : (
                 <div className={`h-full w-full ${configExpanded ? 'min-h-[500px]' : 'min-h-[600px]'}`}>
                   {spaceId && tenantId && apiKey ? (
+                    // <FastnWidget
+                    //   projectId={spaceId}
+                    //   tenantId={tenantId}
+                    //   apiKey={apiKey}
+                    //   theme="light"
+                    //   env="LIVE"
+                    //   style={{
+                    //     height: '100%',
+                    //     width: '100%',
+                    //     border: 'none',
+                    //     borderRadius: '8px',
+                    //   }}
+                    // />
                     <FastnWidget
-                      projectId={spaceId}
-                      tenantId={tenantId}
-                      apiKey={apiKey}
-                      theme="light"
-                      env="LIVE"
-                      style={{
+      projectId={spaceId}
+      authToken={authToken}
+      tenantId={tenantId}
+      apiKey={apiKey}
+      theme="light"
+      env="LIVE"
+      style={{
                         height: '100%',
                         width: '100%',
                         border: 'none',
                         borderRadius: '8px',
                       }}
-                    />
+    />
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-500 text-center text-sm px-4">
