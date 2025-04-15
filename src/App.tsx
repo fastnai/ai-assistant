@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 
@@ -29,10 +29,14 @@ function App() {
   // State for model selection, loaded from localStorage
   const [tenantId, setTenantId] = useState<string>(() => localStorage.getItem('fastnTenantId') || '');
   const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('fastnSelectedModel') || 'claude-3-7-sonnet-20250219');
+  // State for username and password
+  const [username, setUsername] = useState<string>(() => localStorage.getItem('fastnUsername') || '');
+  const [password, setPassword] = useState<string>(() => localStorage.getItem('fastnPassword') || '');
+  const [authToken, setAuthToken] = useState<string>('');
+  const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  const [sidebarView, setSidebarView] = useState<'tools' | 'widgets'>('tools');
-  const [configExpanded, setConfigExpanded] = useState(true);
-  const authToken = useAuth();
+  const [sidebarView, setSidebarView] = useState<'tools' | 'widgets' | 'config'>('config');
+  const auth = useAuth();
   // Available models that support tool calls
   const modelsWithToolCalls = [
     // { name: 'Claude 3.7 Sonnet', id: 'claude-3-7-sonnet-20250219' },
@@ -75,6 +79,74 @@ function App() {
   useEffect(() => {
     localStorage.setItem('fastnSelectedModel', selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnUsername', username);
+  }, [username]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnPassword', password);
+  }, [password]);
+
+  // Function to fetch auth token when username and password are available
+  const fetchAuthToken = async () => {
+    if (!username || !password) {
+      setAuthStatus('idle');
+      return;
+    }
+    
+    try {
+      setAuthStatus('loading');
+      
+      // Using the new API endpoint
+      const response = await fetch('https://live.fastn.ai/api/v1/generateFastnAccessToken', {
+        method: 'POST',
+        headers: {
+          'x-fastn-api-key': "21112588-769a-4311-a359-cf094bee5382",
+          'Content-Type': 'application/json',
+          'x-fastn-space-id': "43aea445-7772-4e45-b1e8-548b96c4bf2b",
+          'x-fastn-space-tenantid': '',
+          'stage': 'LIVE'
+        },
+        body: JSON.stringify({ 
+          input: {
+            username: username,
+            password: password
+          } 
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Auth API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Auth token response:', data);
+      
+      // Extract the access_token directly from the response
+      const accessToken = data.access_token;
+      console.log('Using access token:', accessToken);
+      setAuthToken(accessToken || '');
+      setAuthStatus('success');
+    } catch (error) {
+      console.error('Error fetching auth token:', error);
+      setAuthStatus('error');
+    }
+  };
+
+  // Just checking if we have saved credentials on mount 
+  useEffect(() => {
+    if (username && password) {
+      console.log('Credentials found, you can use the login button to authenticate');
+    }
+  }, []);
+
+  // Make sure unauthenticated users stay on the config tab
+  useEffect(() => {
+    if (authStatus !== 'success' && sidebarView !== 'config') {
+      setSidebarView('config');
+    }
+  }, [authStatus, sidebarView]);
 
   const loadTools = async () => {
     if (!apiKey || !spaceId) {
@@ -502,110 +574,59 @@ Result: ${JSON.stringify(response)}`,
           }`}
         >
           <div className="h-full overflow-y-auto p-4 flex flex-col">
-            {/* Configuration Section */}
-            <div className="mb-4 border-b pb-2">
-              <div className="flex justify-between items-center cursor-pointer mb-2" onClick={() => setConfigExpanded(!configExpanded)}>
-                <h2 className="text-xl font-bold">Configuration</h2>
-                {configExpanded ? 
-                  <ChevronUp className="w-5 h-5 text-gray-500" /> : 
-                  <ChevronDown className="w-5 h-5 text-gray-500" />
-                }
-              </div>
-              
-              {configExpanded && (
-                <div className="space-y-3 mb-2">
-                  <div>
-                    <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
-                    </label>
-                    <input
-                      type="password"
-                      id="apiKey"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="Enter your API Key"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
-                    </label>
-                    <input
-                      type="text"
-                      id="spaceId"
-                      value={spaceId}
-                      onChange={(e) => setSpaceId(e.target.value)}
-                      placeholder="Enter your Space ID"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
-                    </label>
-                    <input
-                      type="text"
-                      id="tenantId"
-                      value={tenantId}
-                      onChange={(e) => setTenantId(e.target.value)}
-                      placeholder="Enter your Tenant ID"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
-                    </label>
-                    <select
-                      id="selectedModel"
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    >
-                      {modelsWithToolCalls.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {/* Add a visual cue if credentials are missing */}
-                  {(!apiKey || !spaceId) && (
-                    <p className="text-xs text-red-600 mt-2">Credentials are required to load and use tools.</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Toggle between Tools and Widgets */}
+            {/* Toggle between Config, Tools, and Widgets */}
             <div className="flex mb-4 border-b pb-4">
               <button
-                onClick={() => setSidebarView('widgets')}
-                className={`flex-1 py-2 px-4 rounded-l-lg flex items-center justify-center gap-2 ${
-                  sidebarView === 'widgets' 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                onClick={() => setSidebarView('config')}
+                className={`flex-1 py-2 px-4 ${sidebarView === 'config' 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
-                <LayoutGrid className="w-4 h-4" />
-                Connector Widgets
+                <div className="flex items-center justify-center gap-2">
+                  <KeyRound className="w-4 h-4" />
+                  <span className="text-sm">Config</span>
+                </div>
               </button>
               <button
                 onClick={() => setSidebarView('tools')}
-                className={`flex-1 py-2 px-4 rounded-r-lg flex items-center justify-center gap-2 ${
-                  sidebarView === 'tools' 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                disabled={authStatus !== 'success'}
+                className={`flex-1 py-2 px-4 ${sidebarView === 'tools' 
+                  ? 'bg-blue-500 text-white' 
+                  : authStatus !== 'success'
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
               >
-                <Wrench className="w-4 h-4" />
-                Tools
+                <div className="flex items-center justify-center gap-2">
+                  <Wrench className="w-4 h-4" />
+                  <span className="text-sm">Tools</span>
+                </div>
+              </button>
+              <button
+                onClick={() => setSidebarView('widgets')}
+                disabled={authStatus !== 'success'}
+                className={`flex-1 py-2 px-4 ${sidebarView === 'widgets' 
+                  ? 'bg-blue-500 text-white' 
+                  : authStatus !== 'success'
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <LayoutGrid className="w-4 h-4" />
+                  <span className="text-sm">Widgets</span>
+                </div>
               </button>
             </div>
 
+            {/* Authentication required message */}
+            {authStatus !== 'success' && (
+              <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
+                <div className="mr-2 flex-shrink-0">⚠️</div>
+                <div>Please log in to access Tools and Connector Widgets</div>
+              </div>
+            )}
+
             {/* Content based on selected view */}
-            <div className={`flex-1 overflow-y-auto ${configExpanded ? 'max-h-[calc(100vh-280px)]' : 'max-h-[calc(100vh-130px)]'}`}>
+            <div className="flex-1 overflow-y-auto">
               {sidebarView === 'tools' ? (
                 <>
                   <div className="flex justify-between items-center mb-3">
@@ -650,36 +671,25 @@ Result: ${JSON.stringify(response)}`,
                     </div>
                   )}
                 </>
-              ) : (
-                <div className={`h-full w-full ${configExpanded ? 'min-h-[500px]' : 'min-h-[600px]'}`}>
-                  {spaceId && tenantId && apiKey ? (
-                    // <FastnWidget
-                    //   projectId={spaceId}
-                    //   tenantId={tenantId}
-                    //   apiKey={apiKey}
-                    //   theme="light"
-                    //   env="LIVE"
-                    //   style={{
-                    //     height: '100%',
-                    //     width: '100%',
-                    //     border: 'none',
-                    //     borderRadius: '8px',
-                    //   }}
-                    // />
-                    <FastnWidget
-      projectId={spaceId}
-      authToken={authToken}
-      tenantId={tenantId}
-      apiKey={apiKey}
-      theme="light"
-      env="LIVE"
-      style={{
-                        height: '100%',
-                        width: '100%',
-                        border: 'none',
-                        borderRadius: '8px',
-                      }}
-    />
+              ) : sidebarView === 'widgets' ? (
+                <div className="h-full w-full min-h-[500px]">
+                  {spaceId && tenantId && apiKey && authToken ? (
+                    <>
+                      <FastnWidget
+                        projectId={spaceId}
+                        authToken={authToken}
+                        tenantId={tenantId}
+                        apiKey={apiKey}
+                        theme="light"
+                        env="LIVE"
+                        style={{
+                          height: '100%',
+                          width: '100%',
+                          border: 'none',
+                          borderRadius: '8px',
+                        }}
+                      />
+                    </>
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-500 text-center text-sm px-4">
@@ -687,6 +697,161 @@ Result: ${JSON.stringify(response)}`,
                       </p>
                     </div>
                   )}
+                </div>
+              ) : (
+                // Config View
+                <div className="p-4 space-y-4">
+                  <h2 className="text-xl font-bold mb-4">Configuration Settings</h2>
+                  
+                  <div className="space-y-3">
+                    {/* Authentication section - always visible */}
+                    <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
+                      <h3 className="font-semibold mb-2">Authentication</h3>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div 
+                          className={`w-3 h-3 rounded-full ${
+                            authStatus === 'idle' ? 'bg-gray-400' : 
+                            authStatus === 'loading' ? 'bg-yellow-400' : 
+                            authStatus === 'success' ? 'bg-green-400' : 
+                            'bg-red-400'
+                          }`}
+                        />
+                        <span className="text-sm">
+                          {authStatus === 'idle' ? 'Not authenticated' : 
+                           authStatus === 'loading' ? 'Authenticating...' : 
+                           authStatus === 'success' ? 'Authenticated' : 
+                           'Authentication failed'}
+                        </span>
+                      </div>
+                      
+                      {/* Username & Password fields */}
+                      <div className="space-y-3 mb-3">
+                        <div>
+                          <label htmlFor="config-username" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                            <User className="w-4 h-4 mr-1 text-gray-500" /> Username
+                          </label>
+                          <input
+                            type="text"
+                            id="config-username"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            placeholder="Enter your Username"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="config-password" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                            <Lock className="w-4 h-4 mr-1 text-gray-500" /> Password
+                          </label>
+                          <input
+                            type="password"
+                            id="config-password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter your Password"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          />
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={fetchAuthToken}
+                        disabled={!username || !password || authStatus === 'loading'}
+                        className={`flex items-center justify-center w-full py-2 px-4 rounded-md text-white 
+                          ${(!username || !password || authStatus === 'loading') 
+                            ? 'bg-gray-400 cursor-not-allowed' 
+                            : 'bg-blue-500 hover:bg-blue-600'}`}
+                      >
+                        {authStatus === 'loading' ? (
+                          <>
+                            <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em] mr-2"></div>
+                            Logging in...
+                          </>
+                        ) : (
+                          'Login'
+                        )}
+                      </button>
+                    </div>
+                    
+                    {/* API Configuration - only visible when logged in */}
+                    {authStatus === 'success' && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
+                        <h3 className="font-semibold mb-2">API Configuration</h3>
+                        <div className="space-y-3">
+                          <div>
+                            <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
+                            </label>
+                            <input
+                              type="password"
+                              id="config-apiKey"
+                              value={apiKey}
+                              onChange={(e) => setApiKey(e.target.value)}
+                              placeholder="Enter your API Key"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                              <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
+                            </label>
+                            <input
+                              type="text"
+                              id="config-spaceId"
+                              value={spaceId}
+                              onChange={(e) => setSpaceId(e.target.value)}
+                              placeholder="Enter your Space ID"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="config-tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
+                            </label>
+                            <input
+                              type="text"
+                              id="config-tenantId"
+                              value={tenantId}
+                              onChange={(e) => setTenantId(e.target.value)}
+                              placeholder="Enter your Tenant ID"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="config-selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
+                            </label>
+                            <select
+                              id="config-selectedModel"
+                              value={selectedModel}
+                              onChange={(e) => setSelectedModel(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            >
+                              {modelsWithToolCalls.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Credentials warning */}
+                    {authStatus === 'success' && (!apiKey || !spaceId) && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
+                        <p className="text-red-600 text-sm">API Key and Space ID are required to load and use tools.</p>
+                      </div>
+                    )}
+                    
+                    {/* Credentials properly set confirmation */}
+                    {authStatus === 'success' && apiKey && spaceId && tenantId && (
+                      <div className="bg-green-50 border border-green-200 rounded-md p-3 mt-2">
+                        <p className="text-green-600 text-sm">Configuration is complete. You can now use Tools and Widgets.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
