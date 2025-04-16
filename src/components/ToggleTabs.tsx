@@ -39,15 +39,15 @@ export const ToggleTabs: React.FC<ToggleTabsProps> = ({
                 handleOnClick();
               }
             }}
-            variant="outline"
+            variant="text"
             disabled={tab.disabled}
             className={classNames(
-              "w-full flex justify-center items-center !px-2 py-2 border-0 font-light !text-[12px] gap-2",
-              selectedTab === tab?.id
-                ? "text-indigo-400 selection:text-indigo-400 bg-white shadow-md active:text-indigo-400"
-                : tab.disabled
-                  ? "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent"
-                  : "bg-transparent text-gray-500 hover:bg-white"
+              "w-full flex justify-center items-center px-2 py-2 border-0 font-light text-[12px] gap-2",
+              {
+                "text-indigo-400 bg-white shadow-md active:text-indigo-400 hover:bg-white": selectedTab === tab.id,
+                "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent": tab.disabled,
+                "bg-transparent text-gray-500 hover:bg-white": selectedTab !== tab.id && !tab.disabled
+              }
             )}
           >
             {tab?.icon}

@@ -9,6 +9,7 @@ import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
 import AuthBox from './components/AuthBox';
+import { Tooltip } from "react-tooltip";
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -41,7 +42,7 @@ function App() {
   );
   const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
 
-  const [sidebarView, setSidebarView] = useState<'tools' | 'widgets' | 'config'>('config');
+  const [sidebarView, setSidebarView] = useState<'tools' | 'apps' | 'config'>('config');
   const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
   const auth = useAuth();
   // Available models that support tool calls
@@ -237,6 +238,7 @@ function App() {
       console.error('Error loading tools:', error);
       handleApiError(error);
       setError('Failed to load tools. Please try refreshing.');
+      setAvailableTools([]); // Clear tools on error
     } finally {
       setIsRefreshing(false);
     }
@@ -244,13 +246,13 @@ function App() {
 
   const loadWidgets = async () => {
     if (!apiKey || !spaceId || !tenantId) {
-      setError('API Key, Space ID, and Tenant ID are required to load widgets.');
+      setError('API Key, Space ID, and Tenant ID are required to load Apps.');
       return;
     }
     
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to load widgets.');
+      setError('Authentication required to load Apps.');
       return;
     }
     
@@ -266,9 +268,9 @@ function App() {
         setWidgetMounted(true);
       }, 100);
     } catch (error) {
-      console.error('Error loading widgets:', error);
+      console.error('Error loading apps:', error);
       handleApiError(error);
-      setError('Failed to load widgets. Please try refreshing.');
+      setError('Failed to load apps. Please try refreshing.');
     } finally {
       setIsRefreshing(false);
     }
@@ -664,7 +666,7 @@ Result: ${JSON.stringify(response)}`,
 
   // Effect to initialize widget when first visiting widgets tab
   useEffect(() => {
-    if (sidebarView === 'widgets' && !widgetMounted && authStatus === 'success' && apiKey && spaceId && tenantId && authToken) {
+    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && apiKey && spaceId && tenantId && authToken) {
       setWidgetMounted(true);
     }
   }, [sidebarView, widgetMounted, authStatus, apiKey, spaceId, tenantId, authToken]);
@@ -758,7 +760,7 @@ Result: ${JSON.stringify(response)}`,
                 selectedTab={sidebarView}
                 setSelectedTab={(id) => {
                   if (authStatus === 'success' || id === 'config') {
-                    setSidebarView(id as 'tools' | 'widgets' | 'config');
+                    setSidebarView(id as 'tools' | 'apps' | 'config');
                   }
                 }}
                 tabs={[
@@ -767,17 +769,17 @@ Result: ${JSON.stringify(response)}`,
                     name: 'Config',
                     icon: <KeyRound className="w-4 h-4" />
                   },
+                  
                   {
+                    id: 'apps',
+                    name: 'Apps',
+                    icon: <LayoutGrid className="w-4 h-4" />,
+                    disabled: authStatus !== 'success' || !apiKey?.trim() || !spaceId?.trim() || !tenantId?.trim()
+                  },{
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success'
-                  },
-                  {
-                    id: 'widgets',
-                    name: 'Widgets',
-                    icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success'
+                    disabled: authStatus !== 'success' || !apiKey?.trim() || !spaceId?.trim()
                   }
                 ]}
                 className="w-full"
@@ -788,7 +790,7 @@ Result: ${JSON.stringify(response)}`,
             {authStatus !== 'success' && (
               <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
                 <div className="mr-2 flex-shrink-0">⚠️</div>
-                <div>Please log in to access Tools and Connector Widgets</div>
+                <div>Please log in to access Tools and Apps</div>
               </div>
             )}
 
@@ -838,15 +840,15 @@ Result: ${JSON.stringify(response)}`,
                     </div>
                   )}
                 </>
-              ) : sidebarView === 'widgets' ? (
+              ) : sidebarView === 'apps' ? (
                 <div className="h-full w-full min-h-[500px]">
                   <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xl font-bold">Available Widgets</h2>
+                    <h2 className="text-xl font-bold">Available Apps</h2>
                     <button
                       onClick={loadWidgets}
                       disabled={isRefreshing || !apiKey || !spaceId || !tenantId}
                       className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId || !tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!apiKey || !spaceId || !tenantId ? "Enter Credentials to Load Widgets" : "Refresh Widgets"}
+                      title={!apiKey || !spaceId || !tenantId ? "Enter Credentials to Load Apps" : "Refresh Apps"}
                     >
                       <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>
@@ -874,7 +876,7 @@ Result: ${JSON.stringify(response)}`,
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-500 text-center text-sm px-4">
-                        Enter Space ID, Tenant ID, and API Key to view available widgets.
+                        Enter Space ID, Tenant ID, and API Key to view available Apps.
                       </p>
                     </div>
                   )}
@@ -901,16 +903,34 @@ Result: ${JSON.stringify(response)}`,
                             <h3 className="font-semibold">Authentication</h3>
                           </div>
                           {authStatus === 'success' && (
+                            <>
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent toggling the box when clicking the logout button
                                 handleLogout();
                               }}
                               className="p-1 rounded-full text-gray-600 hover:text-red-600"
-                              title="Logout"
+                              data-tooltip-id="logout"
+                              data-tooltip-content={"Logout"}
                             >
                               <LogOut className="w-4 h-4" />
                             </button>
+                            <Tooltip
+                            style={{
+                              borderRadius: "4px",
+                              border: "1px solid #000",
+                              backgroundColor: "#000",
+                              color: "#fff",
+                              zIndex: 30,
+                              fontSize: "12px",
+                              padding: "4px 8px",
+                              maxWidth: "80px"
+                            }}
+                            id="logout"
+                            place="top"
+                            delayHide={100}
+                            delayShow={300}
+                          /></>
                           )}
                         </div>
                       }
