@@ -216,12 +216,6 @@ function App() {
   }, [authStatus, sidebarView]);
 
   const loadTools = async () => {
-    if (!apiKey || !spaceId) {
-      setError('API Key and Space ID are required to load tools.');
-      setAvailableTools([]); // Clear tools if credentials missing
-      return;
-    }
-    
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
       setError('Authentication required to load tools.');
@@ -245,8 +239,8 @@ function App() {
   };
 
   const loadWidgets = async () => {
-    if (!apiKey || !spaceId || !tenantId) {
-      setError('API Key, Space ID, and Tenant ID are required to load Apps.');
+    if (!tenantId) {
+      setError('Tenant ID is required to load Apps.');
       return;
     }
     
@@ -311,12 +305,6 @@ function App() {
   };
 
   const handleSendMessage = async (message: string) => {
-    if (!apiKey || !spaceId) {
-      setError('API Key and Space ID are required before sending messages.');
-      setIsLoading(false);
-      return;
-    }
-    
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
       setError('Authentication required to send messages.');
@@ -424,12 +412,6 @@ function App() {
   };
 
   const handleExecuteTool = async (actionData: any) => {
-    if (!apiKey || !spaceId) {
-        setError('API Key and Space ID are required to execute tools.');
-        setIsLoading(false);
-        return;
-    }
-    
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
       setError('Authentication required to execute tools.');
@@ -660,16 +642,15 @@ Result: ${JSON.stringify(response)}`,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Add state for password and API key visibility
+  // Add state for password
   const [showPassword, setShowPassword] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
 
   // Effect to initialize widget when first visiting widgets tab
   useEffect(() => {
-    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && apiKey && spaceId && tenantId && authToken) {
+    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
       setWidgetMounted(true);
     }
-  }, [sidebarView, widgetMounted, authStatus, apiKey, spaceId, tenantId, authToken]);
+  }, [sidebarView, widgetMounted, authStatus, tenantId, authToken]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
@@ -774,12 +755,12 @@ Result: ${JSON.stringify(response)}`,
                     id: 'apps',
                     name: 'Apps',
                     icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !apiKey?.trim() || !spaceId?.trim() || !tenantId?.trim()
+                    disabled: authStatus !== 'success' || !tenantId?.trim()
                   },{
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !apiKey?.trim() || !spaceId?.trim()
+                    disabled: authStatus !== 'success'
                   }
                 ]}
                 className="w-full"
@@ -802,19 +783,15 @@ Result: ${JSON.stringify(response)}`,
                     <h2 className="text-xl font-bold">Available Tools</h2>
                     <button
                       onClick={loadTools}
-                      disabled={isRefreshing || !apiKey || !spaceId}
-                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!apiKey || !spaceId ? "Enter Credentials to Load Tools" : "Refresh Tools"}
+                      disabled={isRefreshing}
+                      className="p-2 rounded-full hover:bg-gray-100"
+                      title="Refresh Tools"
                     >
                       <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                   
-                  {(!apiKey || !spaceId) ? (
-                    <div className="flex items-center justify-center h-20">
-                      <p className="text-gray-500 text-center text-sm px-4">Enter API Key and Space ID above to load tools.</p>
-                    </div>
-                  ) : availableTools.length > 0 ? (
+                  {availableTools.length > 0 ? (
                     <div className="space-y-3">
                       {availableTools.map((tool: Tool, index: number) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
@@ -846,14 +823,14 @@ Result: ${JSON.stringify(response)}`,
                     <h2 className="text-xl font-bold">Available Apps</h2>
                     <button
                       onClick={loadWidgets}
-                      disabled={isRefreshing || !apiKey || !spaceId || !tenantId}
-                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId || !tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!apiKey || !spaceId || !tenantId ? "Enter Credentials to Load Apps" : "Refresh Apps"}
+                      disabled={isRefreshing || !tenantId}
+                      className={`p-2 rounded-full hover:bg-gray-100 ${(!tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={!tenantId ? "Enter Tenant ID to Load Apps" : "Refresh Apps"}
                     >
                       <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
-                  {spaceId && tenantId && apiKey && authToken ? (
+                  {tenantId && authToken ? (
                     <>
                       {widgetMounted && (
                         <FastnWidget
@@ -876,7 +853,7 @@ Result: ${JSON.stringify(response)}`,
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-500 text-center text-sm px-4">
-                        Enter Space ID, Tenant ID, and API Key to view available Apps.
+                        Enter Tenant ID to view available Apps.
                       </p>
                     </div>
                   )}
@@ -1018,29 +995,6 @@ Result: ${JSON.stringify(response)}`,
                         body={
                           <div className="space-y-3">
                             <div>
-                              <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type={showApiKey ? "text" : "password"}
-                                  id="config-apiKey"
-                                  value={apiKey}
-                                  onChange={(e) => setApiKey(e.target.value)}
-                                  placeholder="Enter your API Key"
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm pr-10"
-                                />
-                                <button 
-                                  type="button"
-                                  onClick={() => setShowApiKey(!showApiKey)}
-                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                                >
-                                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              </div>
-                            </div>
-                            <div>
                               <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
                                 <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
                               </label>
@@ -1091,9 +1045,9 @@ Result: ${JSON.stringify(response)}`,
                     )}
                     
                     {/* Credentials warning */}
-                    {authStatus === 'success' && (!apiKey || !spaceId) && (
+                    {authStatus === 'success' && (!tenantId) && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
-                        <p className="text-red-600 text-sm">API Key and Space ID are required to load and use tools.</p>
+                        <p className="text-red-600 text-sm">Tenant ID is required to load and use apps.</p>
                       </div>
                     )}
                     
