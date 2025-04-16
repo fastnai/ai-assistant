@@ -4,9 +4,11 @@ import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
+import { ToggleTabs } from './components/ToggleTabs';
+import AuthBox from './components/AuthBox';
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -21,6 +23,7 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [streamingText, setStreamingText] = useState('');
   const [toolResults, setToolResults] = useState<Record<string, any>>({});
+  const [widgetKey, setWidgetKey] = useState<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // State for API Key and Space ID, loaded from localStorage
@@ -32,10 +35,14 @@ function App() {
   // State for username and password
   const [username, setUsername] = useState<string>(() => localStorage.getItem('fastnUsername') || '');
   const [password, setPassword] = useState<string>(() => localStorage.getItem('fastnPassword') || '');
-  const [authToken, setAuthToken] = useState<string>('');
-  const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [authToken, setAuthToken] = useState<string>(() => localStorage.getItem('fastnAuthToken') || '');
+  const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(() => 
+    (localStorage.getItem('fastnAuthStatus') as 'idle' | 'loading' | 'success' | 'error') || 'idle'
+  );
+  const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
 
   const [sidebarView, setSidebarView] = useState<'tools' | 'widgets' | 'config'>('config');
+  const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
   const auth = useAuth();
   // Available models that support tool calls
   const modelsWithToolCalls = [
@@ -52,6 +59,18 @@ function App() {
     { name: 'Gemini 1.5 Flash 002', id: 'gemini-1.5-flash-002' },
     { name: 'Gemini 2.0 Flash 001', id: 'gemini-2.0-flash-001' }
   ];
+
+  // State to control the authentication box expansion
+  const [authBoxExpanded, setAuthBoxExpanded] = useState<boolean>(() => authStatus !== 'success');
+  
+  // Close the auth box when user logs in
+  useEffect(() => {
+    if (authStatus === 'success') {
+      setAuthBoxExpanded(false);
+    } else {
+      setAuthBoxExpanded(true);
+    }
+  }, [authStatus]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -87,16 +106,42 @@ function App() {
   useEffect(() => {
     localStorage.setItem('fastnPassword', password);
   }, [password]);
+  
+  useEffect(() => {
+    localStorage.setItem('fastnAuthToken', authToken);
+  }, [authToken]);
+  
+  useEffect(() => {
+    localStorage.setItem('fastnAuthStatus', authStatus);
+  }, [authStatus]);
+
+  // Function to handle logout
+  const handleLogout = () => {
+    // Clear authentication data
+    setAuthToken('');
+    setAuthStatus('idle');
+    // Expand the auth box
+    setAuthBoxExpanded(true);
+    console.log('User logged out');
+  };
 
   // Function to fetch auth token when username and password are available
-  const fetchAuthToken = async () => {
+  const fetchAuthToken = async (forceRefresh = false) => {
     if (!username || !password) {
       setAuthStatus('idle');
       return;
     }
     
+    // If we already have an auth token and successful status, no need to re-authenticate
+    // Unless forceRefresh is true (e.g., when login button is clicked)
+    if (authToken && authStatus === 'success' && !forceRefresh) {
+      console.log('Already authenticated with token');
+      return;
+    }
+    
     try {
       setAuthStatus('loading');
+      setAuthErrorMessage('');
       
       // Using the new API endpoint
       const response = await fetch('https://live.fastn.ai/api/v1/generateFastnAccessToken', {
@@ -117,7 +162,9 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`Auth API error: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || errorData.message || `Auth API error: ${response.status}`;
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
@@ -126,19 +173,38 @@ function App() {
       // Extract the access_token directly from the response
       const accessToken = data.access_token;
       console.log('Using access token:', accessToken);
-      setAuthToken(accessToken || '');
+      
+      if (!accessToken) {
+        throw new Error('No access token received from authentication server');
+      }
+      
+      setAuthToken(accessToken);
       setAuthStatus('success');
+      
+      // Close the auth box on successful login
+      setAuthBoxExpanded(false);
+      
+      // Load tools once authenticated
+      await loadTools();
     } catch (error) {
       console.error('Error fetching auth token:', error);
+      // Clear the token and status if authentication fails
+      setAuthToken('');
       setAuthStatus('error');
+      setAuthErrorMessage(error instanceof Error ? error.message : 'Authentication failed');
     }
   };
 
   // Just checking if we have saved credentials on mount 
   useEffect(() => {
-    if (username && password) {
-      console.log('Credentials found, you can use the login button to authenticate');
+    if (username && password && authStatus === 'idle') {
+      console.log('Credentials found, trying to authenticate automatically');
+      fetchAuthToken(false); // Don't force refresh on initial load
+    } else if (authStatus === 'success' && authToken) {
+      console.log('Already authenticated, loading tools');
+      loadTools();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Make sure unauthenticated users stay on the config tab
@@ -154,6 +220,13 @@ function App() {
       setAvailableTools([]); // Clear tools if credentials missing
       return;
     }
+    
+    // Verify we have a valid authentication token
+    if (authStatus !== 'success' || !authToken) {
+      setError('Authentication required to load tools.');
+      return;
+    }
+    
     try {
       setIsRefreshing(true);
       setError(null);
@@ -162,7 +235,40 @@ function App() {
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
+      handleApiError(error);
       setError('Failed to load tools. Please try refreshing.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const loadWidgets = async () => {
+    if (!apiKey || !spaceId || !tenantId) {
+      setError('API Key, Space ID, and Tenant ID are required to load widgets.');
+      return;
+    }
+    
+    // Verify we have a valid authentication token
+    if (authStatus !== 'success' || !authToken) {
+      setError('Authentication required to load widgets.');
+      return;
+    }
+    
+    try {
+      setIsRefreshing(true);
+      setError(null);
+      // Validate the authentication token
+      await validateAuthToken();
+      // Force remount of the FastnWidget component
+      setWidgetMounted(false);
+      setTimeout(() => {
+        setWidgetKey(prevKey => prevKey + 1);
+        setWidgetMounted(true);
+      }, 100);
+    } catch (error) {
+      console.error('Error loading widgets:', error);
+      handleApiError(error);
+      setError('Failed to load widgets. Please try refreshing.');
     } finally {
       setIsRefreshing(false);
     }
@@ -208,6 +314,14 @@ function App() {
       setIsLoading(false);
       return;
     }
+    
+    // Verify we have a valid authentication token
+    if (authStatus !== 'success' || !authToken) {
+      setError('Authentication required to send messages.');
+      setIsLoading(false);
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
     addMessage('user', message);
@@ -281,6 +395,7 @@ function App() {
         selectedModel
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        handleApiError(error);
         setError(errorMessage);
         
         // Update the temporary message to show the error
@@ -299,6 +414,7 @@ function App() {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      handleApiError(error);
       setError(errorMessage);
       addMessage('assistant', `Error: ${errorMessage}`);
       setIsLoading(false);
@@ -310,6 +426,13 @@ function App() {
         setError('API Key and Space ID are required to execute tools.');
         setIsLoading(false);
         return;
+    }
+    
+    // Verify we have a valid authentication token
+    if (authStatus !== 'success' || !authToken) {
+      setError('Authentication required to execute tools.');
+      setIsLoading(false);
+      return;
     }
     
     if (!actionData) {
@@ -441,6 +564,7 @@ Result: ${JSON.stringify(response)}`,
         selectedModel
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        handleApiError(error);
         setError(errorMessage);
         
         // Update the existing message to show the error
@@ -460,6 +584,7 @@ Result: ${JSON.stringify(response)}`,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      handleApiError(error);
       setError(errorMessage);
       
       // Update the existing message with the error
@@ -490,6 +615,59 @@ Result: ${JSON.stringify(response)}`,
   const toggleSidebar = () => {
     setSidebarVisible(!sidebarVisible);
   };
+
+  // Function to validate the current auth token
+  const validateAuthToken = async () => {
+    if (!authToken || authStatus !== 'success') {
+      return false;
+    }
+    
+    try {
+      // A simple API call that requires authentication to verify token validity
+      // This could be replaced with a specific token validation endpoint if available
+      const tools = await getTools('chat', apiKey, spaceId);
+      // If we get a successful response, the token is still valid
+      return true;
+    } catch (error) {
+      console.error('Token validation failed:', error);
+      // Clear the invalid token
+      setAuthToken('');
+      setAuthStatus('error');
+      return false;
+    }
+  };
+  
+  // Handle API errors related to authentication
+  const handleApiError = (error: any) => {
+    // Check if the error is an authentication error
+    if (error.status === 401 || error.message?.includes('auth') || error.message?.includes('token')) {
+      console.error('Authentication error detected:', error);
+      // Clear the token and status
+      setAuthToken('');
+      setAuthStatus('error');
+      setError('Your session has expired. Please log in again.');
+    }
+    return error;
+  };
+
+  // Verify token on initial load and when dependencies change
+  useEffect(() => {
+    if (authToken && authStatus === 'success') {
+      validateAuthToken().catch(handleApiError);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Add state for password and API key visibility
+  const [showPassword, setShowPassword] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Effect to initialize widget when first visiting widgets tab
+  useEffect(() => {
+    if (sidebarView === 'widgets' && !widgetMounted && authStatus === 'success' && apiKey && spaceId && tenantId && authToken) {
+      setWidgetMounted(true);
+    }
+  }, [sidebarView, widgetMounted, authStatus, apiKey, spaceId, tenantId, authToken]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
@@ -575,46 +753,35 @@ Result: ${JSON.stringify(response)}`,
         >
           <div className="h-full overflow-y-auto p-4 flex flex-col">
             {/* Toggle between Config, Tools, and Widgets */}
-            <div className="flex mb-4 border-b pb-4">
-              <button
-                onClick={() => setSidebarView('config')}
-                className={`flex-1 py-2 px-4 ${sidebarView === 'config' 
-                  ? 'bg-blue-500 text-white' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <KeyRound className="w-4 h-4" />
-                  <span className="text-sm">Config</span>
-                </div>
-              </button>
-              <button
-                onClick={() => setSidebarView('tools')}
-                disabled={authStatus !== 'success'}
-                className={`flex-1 py-2 px-4 ${sidebarView === 'tools' 
-                  ? 'bg-blue-500 text-white' 
-                  : authStatus !== 'success'
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <Wrench className="w-4 h-4" />
-                  <span className="text-sm">Tools</span>
-                </div>
-              </button>
-              <button
-                onClick={() => setSidebarView('widgets')}
-                disabled={authStatus !== 'success'}
-                className={`flex-1 py-2 px-4 ${sidebarView === 'widgets' 
-                  ? 'bg-blue-500 text-white' 
-                  : authStatus !== 'success'
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <LayoutGrid className="w-4 h-4" />
-                  <span className="text-sm">Widgets</span>
-                </div>
-              </button>
+            <div className="flex mb-1 pb-4">
+              <ToggleTabs
+                selectedTab={sidebarView}
+                setSelectedTab={(id) => {
+                  if (authStatus === 'success' || id === 'config') {
+                    setSidebarView(id as 'tools' | 'widgets' | 'config');
+                  }
+                }}
+                tabs={[
+                  {
+                    id: 'config',
+                    name: 'Config',
+                    icon: <KeyRound className="w-4 h-4" />
+                  },
+                  {
+                    id: 'tools',
+                    name: 'Tools',
+                    icon: <Wrench className="w-4 h-4" />,
+                    disabled: authStatus !== 'success'
+                  },
+                  {
+                    id: 'widgets',
+                    name: 'Widgets',
+                    icon: <LayoutGrid className="w-4 h-4" />,
+                    disabled: authStatus !== 'success'
+                  }
+                ]}
+                className="w-full"
+              />
             </div>
 
             {/* Authentication required message */}
@@ -673,22 +840,36 @@ Result: ${JSON.stringify(response)}`,
                 </>
               ) : sidebarView === 'widgets' ? (
                 <div className="h-full w-full min-h-[500px]">
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-xl font-bold">Available Widgets</h2>
+                    <button
+                      onClick={loadWidgets}
+                      disabled={isRefreshing || !apiKey || !spaceId || !tenantId}
+                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId || !tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={!apiKey || !spaceId || !tenantId ? "Enter Credentials to Load Widgets" : "Refresh Widgets"}
+                    >
+                      <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                   {spaceId && tenantId && apiKey && authToken ? (
                     <>
-                      <FastnWidget
-                        projectId={spaceId}
-                        authToken={authToken}
-                        tenantId={tenantId}
-                        apiKey={apiKey}
-                        theme="light"
-                        env="LIVE"
-                        style={{
-                          height: '100%',
-                          width: '100%',
-                          border: 'none',
-                          borderRadius: '8px',
-                        }}
-                      />
+                      {widgetMounted && (
+                        <FastnWidget
+                          key={widgetKey}
+                          projectId={spaceId}
+                          authToken={authToken}
+                          tenantId={tenantId}
+                          apiKey={apiKey}
+                          theme="light"
+                          env="LIVE"
+                          style={{
+                            height: '100%',
+                            width: '100%',
+                            border: 'none',
+                            borderRadius: '8px',
+                          }}
+                        />
+                      )}
                     </>
                   ) : (
                     <div className="flex items-center justify-center h-full">
@@ -700,142 +881,193 @@ Result: ${JSON.stringify(response)}`,
                 </div>
               ) : (
                 // Config View
-                <div className="p-4 space-y-4">
+                <div className="space-y-4">
                   <h2 className="text-xl font-bold mb-4">Configuration Settings</h2>
                   
                   <div className="space-y-3">
                     {/* Authentication section - always visible */}
-                    <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
-                      <h3 className="font-semibold mb-2">Authentication</h3>
-                      <div className="flex items-center gap-2 mb-3">
-                        <div 
-                          className={`w-3 h-3 rounded-full ${
-                            authStatus === 'idle' ? 'bg-gray-400' : 
-                            authStatus === 'loading' ? 'bg-yellow-400' : 
-                            authStatus === 'success' ? 'bg-green-400' : 
-                            'bg-red-400'
-                          }`}
-                        />
-                        <span className="text-sm">
-                          {authStatus === 'idle' ? 'Not authenticated' : 
-                           authStatus === 'loading' ? 'Authenticating...' : 
-                           authStatus === 'success' ? 'Authenticated' : 
-                           'Authentication failed'}
+                    <AuthBox 
+                      header={
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-2">
+                            <div 
+                              className={`w-3 h-3 rounded-full ${
+                                authStatus === 'idle' ? 'bg-gray-400' : 
+                                authStatus === 'loading' ? 'bg-yellow-400' : 
+                                authStatus === 'success' ? 'bg-green-400' : 
+                                'bg-red-400'
+                              }`}
+                            />
+                            <h3 className="font-semibold">Authentication</h3>
+                          </div>
+                          {authStatus === 'success' && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent toggling the box when clicking the logout button
+                                handleLogout();
+                              }}
+                              className="p-1 rounded-full text-gray-600 hover:text-red-600"
+                              title="Logout"
+                            >
+                              <LogOut className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      }
+                      body={
+                        <>
+                          {/* Username & Password fields */}
+                          <div className="space-y-3 mb-3">
+                          <span className="text-sm text-red-600">
+                          { 
+                           authStatus === 'error' && (authErrorMessage || 'Authentication failed')
+                           }
                         </span>
-                      </div>
-                      
-                      {/* Username & Password fields */}
-                      <div className="space-y-3 mb-3">
-                        <div>
-                          <label htmlFor="config-username" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                            <User className="w-4 h-4 mr-1 text-gray-500" /> Username
-                          </label>
-                          <input
-                            type="text"
-                            id="config-username"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            placeholder="Enter your Username"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label htmlFor="config-password" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                            <Lock className="w-4 h-4 mr-1 text-gray-500" /> Password
-                          </label>
-                          <input
-                            type="password"
-                            id="config-password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Enter your Password"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                          />
-                        </div>
-                      </div>
-                      
-                      <button
-                        onClick={fetchAuthToken}
-                        disabled={!username || !password || authStatus === 'loading'}
-                        className={`flex items-center justify-center w-full py-2 px-4 rounded-md text-white 
-                          ${(!username || !password || authStatus === 'loading') 
-                            ? 'bg-gray-400 cursor-not-allowed' 
-                            : 'bg-blue-500 hover:bg-blue-600'}`}
-                      >
-                        {authStatus === 'loading' ? (
-                          <>
-                            <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em] mr-2"></div>
-                            Logging in...
-                          </>
-                        ) : (
-                          'Login'
-                        )}
-                      </button>
-                    </div>
+                            <div>
+                              <label htmlFor="config-username" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <User className="w-4 h-4 mr-1 text-gray-500" /> Username
+                              </label>
+                              <input
+                                type="text"
+                                id="config-username"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                placeholder="Enter your Username"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="config-password" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <Lock className="w-4 h-4 mr-1 text-gray-500" /> Password
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type={showPassword ? "text" : "password"}
+                                  id="config-password"
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  placeholder="Enter your Password"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm pr-10"
+                                />
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                                  aria-label={showPassword ? "Hide password" : "Show password"}
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => fetchAuthToken(true)}
+                            disabled={!username || !password || authStatus === 'loading'}
+                            className={`flex items-center justify-center w-full py-2 px-4 rounded-md text-white 
+                              ${(!username || !password || authStatus === 'loading') 
+                                ? 'bg-gray-400 cursor-not-allowed' 
+                                : 'bg-black hover:bg-white hover:text-black'}`}
+                          >
+                            {authStatus === 'loading' ? (
+                              <>
+                                <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em] mr-2"></div>
+                                Logging in...
+                              </>
+                            ) : (
+                               authStatus === 'success'?'Reconnect':
+                              'Login'
+                            )}
+                          </button>
+                        </>
+                      }
+                      isCollapsible={true}
+                      defaultExpanded={authStatus !== 'success'}
+                      isExpanded={authBoxExpanded}
+                      onToggle={(expanded) => setAuthBoxExpanded(expanded)}
+                    />
                     
                     {/* API Configuration - only visible when logged in */}
                     {authStatus === 'success' && (
-                      <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
-                        <h3 className="font-semibold mb-2">API Configuration</h3>
-                        <div className="space-y-3">
-                          <div>
-                            <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
-                            </label>
-                            <input
-                              type="password"
-                              id="config-apiKey"
-                              value={apiKey}
-                              onChange={(e) => setApiKey(e.target.value)}
-                              placeholder="Enter your API Key"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            />
+                      <AuthBox 
+                        header={
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold">API Configuration</h3>
                           </div>
-                          <div>
-                            <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                              <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
-                            </label>
-                            <input
-                              type="text"
-                              id="config-spaceId"
-                              value={spaceId}
-                              onChange={(e) => setSpaceId(e.target.value)}
-                              placeholder="Enter your Space ID"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            />
+                        }
+                        body={
+                          <div className="space-y-3">
+                            <div>
+                              <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type={showApiKey ? "text" : "password"}
+                                  id="config-apiKey"
+                                  value={apiKey}
+                                  onChange={(e) => setApiKey(e.target.value)}
+                                  placeholder="Enter your API Key"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm pr-10"
+                                />
+                                <button 
+                                  type="button"
+                                  onClick={() => setShowApiKey(!showApiKey)}
+                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                                >
+                                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
+                              </label>
+                              <input
+                                type="text"
+                                id="config-spaceId"
+                                value={spaceId}
+                                onChange={(e) => setSpaceId(e.target.value)}
+                                placeholder="Enter your Space ID"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="config-tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
+                              </label>
+                              <input
+                                type="text"
+                                id="config-tenantId"
+                                value={tenantId}
+                                onChange={(e) => setTenantId(e.target.value)}
+                                placeholder="Enter your Tenant ID"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="config-selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
+                              </label>
+                              <select
+                                id="config-selectedModel"
+                                value={selectedModel}
+                                onChange={(e) => setSelectedModel(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              >
+                                {modelsWithToolCalls.map((model) => (
+                                  <option key={model.id} value={model.id}>
+                                    {model.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
-                          <div>
-                            <label htmlFor="config-tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
-                            </label>
-                            <input
-                              type="text"
-                              id="config-tenantId"
-                              value={tenantId}
-                              onChange={(e) => setTenantId(e.target.value)}
-                              placeholder="Enter your Tenant ID"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label htmlFor="config-selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                              <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
-                            </label>
-                            <select
-                              id="config-selectedModel"
-                              value={selectedModel}
-                              onChange={(e) => setSelectedModel(e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            >
-                              {modelsWithToolCalls.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
+                        }
+                        isCollapsible={true}
+                        defaultExpanded={true}
+                      />
                     )}
                     
                     {/* Credentials warning */}
@@ -846,11 +1078,7 @@ Result: ${JSON.stringify(response)}`,
                     )}
                     
                     {/* Credentials properly set confirmation */}
-                    {authStatus === 'success' && apiKey && spaceId && tenantId && (
-                      <div className="bg-green-50 border border-green-200 rounded-md p-3 mt-2">
-                        <p className="text-green-600 text-sm">Configuration is complete. You can now use Tools and Widgets.</p>
-                      </div>
-                    )}
+                  
                   </div>
                 </div>
               )}

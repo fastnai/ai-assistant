@@ -1,0 +1,60 @@
+import React from "react";
+import { Button } from "./common/buttons/button";
+import classNames from "classnames";
+
+interface Tab {
+  id: string;
+  name: string;
+  icon?: React.ReactNode;
+  disabled?: boolean;
+}
+
+interface ToggleTabsProps {
+  className?: string;
+  tabs: Tab[];
+  setSelectedTab: (id: string) => void;
+  selectedTab: string;
+  handleOnClick?: () => void;
+}
+
+export const ToggleTabs: React.FC<ToggleTabsProps> = ({
+  className = "",
+  tabs,
+  setSelectedTab,
+  selectedTab,
+  handleOnClick = () => {},
+}) => {
+  return (
+    <div
+      className={`gap-1 flex bg-gray-100 p-1 rounded-md justify-start h-full w-full
+        ${className}`}
+    >
+      {tabs?.map((tab) => {
+        return (
+          <Button
+            key={tab?.id}
+            onClick={() => {
+              if (!tab.disabled) {
+                setSelectedTab(tab?.id);
+                handleOnClick();
+              }
+            }}
+            variant="outline"
+            disabled={tab.disabled}
+            className={classNames(
+              "w-full flex justify-center items-center !px-2 py-2 border-0 font-light !text-[12px] gap-2",
+              selectedTab === tab?.id
+                ? "text-indigo-400 selection:text-indigo-400 bg-white shadow-md active:text-indigo-400"
+                : tab.disabled
+                  ? "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent"
+                  : "bg-transparent text-gray-500 hover:bg-white"
+            )}
+          >
+            {tab?.icon}
+            {tab?.name}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}; 
