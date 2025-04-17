@@ -931,7 +931,7 @@ Result: ${JSON.stringify(response)}`,
                           tenantId={tenantId}
                           apiKey={apiKey}
                           theme="light"
-                          env="LIVE"
+                          env="DRAFT"
                           style={{
                             height: '100%',
                             width: '100%',
