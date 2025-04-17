@@ -42,9 +42,9 @@ export const ToggleTabs: React.FC<ToggleTabsProps> = ({
             variant="text"
             disabled={tab.disabled}
             className={classNames(
-              "w-full flex justify-center items-center px-2 py-2 border-0 font-light text-[12px] gap-2",
+              "w-full flex justify-center items-center px-2 py-2 border-0 font-[500] text-[12px] gap-2",
               {
-                "text-indigo-400 bg-white shadow-md active:text-indigo-400 hover:bg-white": selectedTab === tab.id,
+                "text-[#7375F2] bg-white shadow-md active:text-[#7375F2] hover:bg-white": selectedTab === tab.id,
                 "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent": tab.disabled,
                 "bg-transparent text-gray-500 hover:bg-white": selectedTab !== tab.id && !tab.disabled
               }

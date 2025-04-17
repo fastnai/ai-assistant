@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut, Bot } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
@@ -674,10 +674,8 @@ Result: ${JSON.stringify(response)}`,
         <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300`}>
           {/* Header */}
           <div className="flex flex-col items-center pt-6 pb-4">
-            <img 
-              src="https://www.shutterstock.com/image-vector/chat-bot-icon-virtual-smart-600nw-2478937553.jpg"
-              alt="AI Agent" 
-              className="w-16 h-16 rounded-full mb-3 shadow-md" 
+            <Bot 
+              className="w-16 h-16 rounded-full mb-3 shadow-md p-3 bg-gradient-to-tr from-[#b857ce] via-[#d04fad] to-[#f9a254] text-white" 
             />
             <h1 className="text-2xl font-bold text-gray-800 mb-2">AI Assistant</h1>
             <button
@@ -735,7 +733,7 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-blue-500 text-white p-2 rounded-l-lg shadow-md hover:bg-blue-600 z-10"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-[#A1A3F7] text-white p-2 rounded-l-lg shadow-md hover:bg-[#8A8CF4] z-10"
           style={{ right: sidebarVisible ? '500px' : '0' }}
           title={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
         >
