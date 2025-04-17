@@ -192,7 +192,7 @@ function App() {
       // Clear the token and status if authentication fails
       setAuthToken('');
       setAuthStatus('error');
-      setAuthErrorMessage(error instanceof Error ? error.message : 'Authentication failed');
+      setAuthErrorMessage('Authentication failed');
     }
   };
 

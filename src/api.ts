@@ -11,6 +11,16 @@ const api = axios.create({
   },
 });
 
+// Update axios request config to include the latest headers before each request
+api.interceptors.request.use(config => {
+  // Get the auth token from localStorage for each request
+  const authToken = localStorage.getItem('fastnAuthToken');
+  if (authToken) {
+    config.headers['authorization'] = `Bearer ${authToken}`;
+  }
+  return config;
+});
+
 export const getTools = async (useCase: string, apiKey: string, spaceId: string): Promise<Tool[]> => {
   if (!apiKey || !spaceId) {
     console.warn('API Key or Space ID is missing. Cannot fetch tools.');

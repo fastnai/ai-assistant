@@ -237,6 +237,7 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
   console.log('Sending request to LLM API:', {
     url: FASTN_API_URL,
     modelName,
+    spaceId,
     bodyPreview: { ...requestBody, input: { ...requestBody.input, messages: '[redacted]' } }
   });
 
@@ -265,7 +266,7 @@ export const getStreamingAIResponse = async (
   onChunk: (text: string) => void,
   onComplete: (response: AIResponse) => void,
   modelName?: string,
-  tenantId?: string 
+  spaceId?: string 
 ) => {
   try {
     // Format previous messages for the backend
@@ -278,8 +279,8 @@ export const getStreamingAIResponse = async (
       { role: 'user' as const, content: message }
     ];
 
-    // Call the backend API - pass only modelName, not tenantId
-    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
+    // Call the backend API - pass spaceId
+    const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
 
     // Handle different response formats based on model type
     let responseText = '';
@@ -387,7 +388,7 @@ export const getToolExecutionResponse = async (
   onChunk?: (text: string) => void,
   onComplete?: (response: AIResponse) => void,
   modelName?: string,
-  tenantId?: string
+  spaceId?: string
 ): Promise<AIResponse> => {
   try {
     // Format previous messages for the backend
@@ -435,8 +436,8 @@ export const getToolExecutionResponse = async (
     // Log conversation for debugging
     console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
 
-   // Call the backend API - pass only modelName, not tenantId
-   const backendResponse = await callBackendAPI(messages, availableTools, modelName);
+   // Call the backend API - pass spaceId
+   const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
 
     // Handle error response
     if (!backendResponse || backendResponse.error) {
