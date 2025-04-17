@@ -185,6 +185,18 @@ function App() {
     setAvailableTools([]);
     setConversation({ messages: [] });
     setToolResults({});
+    
+    // Automatically load tools if authenticated and space ID is provided
+    if (authStatus === 'success' && authToken && newSpaceId.trim()) {
+      // Use setTimeout to allow state update to complete first
+      setTimeout(() => {
+        loadTools();
+        // Also load widgets if tenant ID is available
+        if (tenantId?.trim()) {
+          loadWidgets();
+        }
+      }, 100);
+    }
   };
 
   // Function to handle Tenant ID change
@@ -195,6 +207,14 @@ function App() {
     // Reset widget data when Tenant ID changes
     setWidgetMounted(false);
     setWidgetKey(prevKey => prevKey + 1);
+    
+    // Automatically load widgets if authenticated and both tenant ID and space ID are provided
+    if (authStatus === 'success' && authToken && newTenantId.trim() && spaceId?.trim()) {
+      // Use setTimeout to allow state update to complete first
+      setTimeout(() => {
+        loadWidgets();
+      }, 100);
+    }
   };
 
   // Function to fetch auth token when username and password are available
@@ -1381,7 +1401,7 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-indigo-400 text-white p-2 rounded-l-lg shadow-md hover:bg-indigo-500 z-30"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-indigo-100 text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
           style={{ right: sidebarVisible ? '500px' : '0' }}
         >
           {sidebarVisible ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
