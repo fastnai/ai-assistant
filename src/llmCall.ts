@@ -141,17 +141,17 @@ function convertToolsAnthropicFormat(tools: any[]) {
   return tools.map(tool => {
     if (tool.type === 'function' && tool.function) {
       const { name, parameters, description } = tool.function;
-
-      // Extract required fields from parameters
-      const requiredFields = parameters.required || [];
+      
+      // Format the name to ensure it only contains allowed characters
+      const formattedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
 
       return {
-        "name": name,
+        "name": formattedName,
         "description": description,
         "input_schema": {
           "type": "object",
           "properties": parameters.properties || {},  // Preserve the original properties structure
-          "required": requiredFields
+          "required": parameters.required || []
         }
       };
     }
@@ -170,8 +170,11 @@ function convertToolsGeminiFormat(tools: any[]) {
     if (tool.type === 'function' && tool.function) {
       const { name, parameters, description } = tool.function;
       
+      // Format the name to ensure it only contains allowed characters
+      const formattedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      
       return {
-        name,
+        name: formattedName,
         description,
         parameters: {
           type: parameters.type,
@@ -204,12 +207,26 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
     'authorization': `Bearer ${authToken}`
   };
 
+  // Format tool names to ensure they meet API requirements 
+  const formattedTools = tools.map(tool => {
+    if (tool.type === 'function' && tool.function && tool.function.name) {
+      return {
+        ...tool,
+        function: {
+          ...tool.function,
+          name: tool.function.name.replace(/[^a-zA-Z0-9_-]/g, '_')
+        }
+      };
+    }
+    return tool;
+  });
+
   // Determine which tool format to use based on model name
-  let formattedTools = tools;
+  let processedTools = formattedTools;
   const requestBody: any = {
     input: {
       messages,
-      tools: formattedTools
+      tools: processedTools
     }
   };
   
@@ -220,14 +237,14 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
     
     // Check for Anthropic models
     if (modelName.includes('claude')) {
-      formattedTools = convertToolsAnthropicFormat(tools);
-      requestBody.input.tools = formattedTools;
+      processedTools = convertToolsAnthropicFormat(tools);
+      requestBody.input.tools = processedTools;
     } 
     // Check for Gemini models
     else if (modelName.includes('gemini')) {
-      formattedTools = convertToolsGeminiFormat(tools);
+      processedTools = convertToolsGeminiFormat(tools);
       // For Gemini, the format is different - tools is an array at the top level
-      requestBody.input.tools = formattedTools;
+      requestBody.input.tools = processedTools;
     }
     // For OpenAI models (gpt), use the original format
   }
