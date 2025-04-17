@@ -1,9 +1,8 @@
 import { Message } from './types';
 
 // Backend API Configuration
-const FASTN_API_URL = 'https://live.fastn.ai/api/v1/llmCall';
-const FASTN_API_KEY = '4f657c13-0f37-4278-90c2-19bc64d0d79a';
-const FASTN_SPACE_ID = 'a964a451-7538-4e34-ac6c-693a2f087fe4';
+const FASTN_API_URL = 'https://live.fastn.ai/api/ucl/llmCall';
+
 
 export interface AIResponse {
   response: string;
@@ -193,15 +192,17 @@ function convertToolsGeminiFormat(tools: any[]) {
 }
 
 // Function to call the backend API and get response
-const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, _tenantId?: string) => {
+const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, spaceId?: string) => {
+  // Get the auth token from localStorage
+  const authToken = localStorage.getItem('fastnAuthToken') || '';
+  
   const headers: Record<string, string> = {
-    'x-fastn-api-key': FASTN_API_KEY,
     'Content-Type': 'application/json',
-    'x-fastn-space-id': FASTN_SPACE_ID,
-    'stage': 'LIVE'
+    'x-fastn-space-id' : spaceId || '',
+    'stage': 'LIVE',
+    'x-fastn-custom-auth': "true",
+    'authorization': `Bearer ${authToken}`
   };
-
-  // Don't add tenant ID to llmCall API
 
   // Determine which tool format to use based on model name
   let formattedTools = tools;
@@ -264,7 +265,7 @@ export const getStreamingAIResponse = async (
   onChunk: (text: string) => void,
   onComplete: (response: AIResponse) => void,
   modelName?: string,
-  tenantId?: string // Keep parameter but don't use it
+  tenantId?: string 
 ) => {
   try {
     // Format previous messages for the backend
@@ -434,8 +435,8 @@ export const getToolExecutionResponse = async (
     // Log conversation for debugging
     console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
 
-    // Call the backend API - pass only modelName, not tenantId
-    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
+   // Call the backend API - pass only modelName, not tenantId
+   const backendResponse = await callBackendAPI(messages, availableTools, modelName);
 
     // Handle error response
     if (!backendResponse || backendResponse.error) {

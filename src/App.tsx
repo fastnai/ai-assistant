@@ -222,6 +222,12 @@ function App() {
       return;
     }
     
+    // Check if Space ID is provided
+    if (!spaceId?.trim()) {
+      setError('Space ID is required to load tools.');
+      return;
+    }
+    
     try {
       setIsRefreshing(true);
       setError(null);
@@ -241,6 +247,12 @@ function App() {
   const loadWidgets = async () => {
     if (!tenantId) {
       setError('Tenant ID is required to load Apps.');
+      return;
+    }
+    
+    // Check if Space ID is provided
+    if (!spaceId?.trim()) {
+      setError('Space ID is required to load Apps.');
       return;
     }
     
@@ -382,7 +394,8 @@ function App() {
           setIsLoading(false);
           setStreamingText('');
         },
-        selectedModel
+        selectedModel,
+        spaceId
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -545,7 +558,8 @@ Result: ${JSON.stringify(response)}`,
           setIsLoading(false);
           setStreamingText('');
         },
-        selectedModel
+        selectedModel,
+        spaceId
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -755,12 +769,12 @@ Result: ${JSON.stringify(response)}`,
                     id: 'apps',
                     name: 'Apps',
                     icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !tenantId?.trim()
+                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim()
                   },{
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success'
+                    disabled: authStatus !== 'success' || !spaceId?.trim()
                   }
                 ]}
                 className="w-full"
@@ -1048,6 +1062,13 @@ Result: ${JSON.stringify(response)}`,
                     {authStatus === 'success' && (!tenantId) && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
                         <p className="text-red-600 text-sm">Tenant ID is required to load and use apps.</p>
+                      </div>
+                    )}
+                    
+                    {/* Space ID warning */}
+                    {authStatus === 'success' && (!spaceId?.trim()) && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
+                        <p className="text-red-600 text-sm">Space ID is required to load and use tools and apps.</p>
                       </div>
                     )}
                     
