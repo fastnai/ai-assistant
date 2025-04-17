@@ -17,6 +17,8 @@
     "@types/classnames": "^2.3.0",
     "axios": "^1.8.4",
     "classnames": "^2.5.1",
+    "formik": "^2.4.6",
+    "heroicons": "^2.2.0",
     "lucide-react": "^0.344.0",
     "oidc-client-ts": "^3.2.0",
     "openai": "^4.91.1",
@@ -27,6 +29,7 @@
     "react-oidc-context": "^3.3.0",
     "react-router-dom": "^7.5.0",
     "react-syntax-highlighter": "^15.5.0",
+    "react-textarea-autosize": "^8.5.9",
     "react-tooltip": "^5.28.1",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1"

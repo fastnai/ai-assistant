@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './components/ChatMessage';
-import { ChatInput } from './components/ChatInput';
+import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
@@ -116,14 +116,55 @@ function App() {
     localStorage.setItem('fastnAuthStatus', authStatus);
   }, [authStatus]);
 
+  // Add ref for ChatInput
+  const chatInputRef = useRef<ChatInputHandles>(null);
+
   // Function to handle logout
   const handleLogout = () => {
     // Clear authentication data
     setAuthToken('');
     setAuthStatus('idle');
+    // Clear user credentials
+    setUsername('');
+    setPassword('');
+    setTenantId('');
+    setSpaceId('');
+    // Clear localStorage data
+    localStorage.removeItem('fastnAuthToken');
+    localStorage.removeItem('fastnAuthStatus');
+    localStorage.removeItem('conversation');
+    localStorage.removeItem('fastnUsername');
+    localStorage.removeItem('fastnPassword');
+    localStorage.removeItem('fastnTenantId');
+    localStorage.removeItem('fastnSpaceId');
+    localStorage.setItem('fastnAuthStatus', 'idle');
+    setToolResults({});
+    // Clear the input field
+    chatInputRef.current?.resetMessage();
     // Expand the auth box
     setAuthBoxExpanded(true);
     console.log('User logged out');
+  };
+
+  // Function to handle Space ID change
+  const handleSpaceIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newSpaceId = e.target.value;
+    setSpaceId(newSpaceId);
+    
+    // Clear tools and related data when Space ID changes
+    setAvailableTools([]);
+    setConversation({ messages: [] });
+    setToolResults({});
+  };
+
+  // Function to handle Tenant ID change
+  const handleTenantIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTenantId = e.target.value;
+    setTenantId(newTenantId);
+    
+    // Reset widget data when Tenant ID changes
+    setWidgetMounted(false);
+    setWidgetKey(prevKey => prevKey + 1);
   };
 
   // Function to fetch auth token when username and password are available
@@ -669,36 +710,40 @@ Result: ${JSON.stringify(response)}`,
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden justify-center">
         {/* Chat area */}
-        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300`}>
+        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? 'py-[130px]' : 'h-full'}`}>
           {/* Header */}
           <div className="flex flex-col items-center pt-6 pb-4">
             <Bot 
               className="w-16 h-16 rounded-full mb-3 shadow-md p-3 bg-gradient-to-tr from-[#b857ce] via-[#d04fad] to-[#f9a254] text-white" 
             />
             <h1 className="text-2xl font-bold text-gray-800 mb-2">AI Assistant</h1>
-            <button
-              onClick={clearConversation}
-              className="flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear Chat
-            </button>
+           
           </div>
           
           {/* Error message */}
-          {error && (
+          {/* {error && (
             <div className="mx-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
               {error}
             </div>
-          )}
+          )} */}
           
           {/* Chat messages */}
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
-            <div className="bg-white rounded-lg shadow-md p-4 h-full overflow-y-auto space-y-4">
+          <div className={`flex-1  px-4 ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+            <div className={`bg-white rounded-lg shadow-md px-4 h-full space-y-4 relative ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+            {conversation.messages.length > 0 &&<div className='w-full py-0.5 bg-white sticky left-0 top-0  z-20 justify-between flex flex-row'>
+              <div></div>
+              <button
+                onClick={clearConversation}
+                className="p-2 text-red-500 hover:text-red-500 hover:bg-gray-100 rounded-full transition-colors"
+                title="Clear chat"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>}
               {conversation.messages.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-gray-500">
+                <div className="flex flex-col h-full items-center justify-center text-gray-500">
                   <p>Send a message to start the conversation</p>
                 </div>
               ) : (
@@ -718,14 +763,24 @@ Result: ${JSON.stringify(response)}`,
           
           {/* Chat input */}
           <div className="p-4">
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
+            <div className={`bg-white rounded-lg shadow-md px-2 py-2 ${authStatus !== 'success' ? 'bg-opacity-75' : ''}`}>
+              <ChatInput 
+                ref={chatInputRef}
+                onSendMessage={handleSendMessage} 
+                disabled={isLoading || authStatus !== 'success'} 
+                className={authStatus !== 'success' ? 'opacity-50' : ''}
+              />
               {isLoading && !streamingText && (
                 <div className="text-center mt-2 text-sm text-gray-500">
-                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-blue-500 border-r-transparent align-[-0.125em] mr-2"></div>
+                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-[#5B5EF0] border-r-transparent align-[-0.125em] mr-2"></div>
                   Processing your request...
                 </div>
               )}
+              {/* {authStatus !== 'success' && (
+                <div className="text-center mt-2 text-sm text-amber-600">
+                  Please log in to send messages
+                </div>
+              )} */}
             </div>
           </div>
         </div>
@@ -733,7 +788,7 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-[#A1A3F7] text-white p-2 rounded-l-lg shadow-md hover:bg-[#8A8CF4] z-10"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-indigo-400 text-white p-2 rounded-l-lg shadow-md hover:bg-indigo-500 z-30"
           style={{ right: sidebarVisible ? '500px' : '0' }}
           title={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
         >
@@ -742,7 +797,7 @@ Result: ${JSON.stringify(response)}`,
 
         {/* Tools Sidebar */}
         <div 
-          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg ${
+          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg z-20 ${
             sidebarVisible ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
@@ -767,12 +822,24 @@ Result: ${JSON.stringify(response)}`,
                     id: 'apps',
                     name: 'Apps',
                     icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim()
+                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success' 
+                      ? "Please log in to access Apps" 
+                      : !tenantId?.trim() 
+                        ? "Tenant ID is required to access Apps" 
+                        : !spaceId?.trim() 
+                          ? "Space ID is required to access Apps" 
+                          : ""
                   },{
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !spaceId?.trim()
+                    disabled: authStatus !== 'success' || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success'
+                      ? "Please log in to access Tools"
+                      : !spaceId?.trim()
+                        ? "Space ID is required to access Tools"
+                        : ""
                   }
                 ]}
                 className="w-full"
@@ -1014,7 +1081,7 @@ Result: ${JSON.stringify(response)}`,
                                 type="text"
                                 id="config-spaceId"
                                 value={spaceId}
-                                onChange={(e) => setSpaceId(e.target.value)}
+                                onChange={handleSpaceIdChange}
                                 placeholder="Enter your Space ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
@@ -1027,7 +1094,7 @@ Result: ${JSON.stringify(response)}`,
                                 type="text"
                                 id="config-tenantId"
                                 value={tenantId}
-                                onChange={(e) => setTenantId(e.target.value)}
+                                onChange={handleTenantIdChange}
                                 placeholder="Enter your Tenant ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
@@ -1057,18 +1124,18 @@ Result: ${JSON.stringify(response)}`,
                     )}
                     
                     {/* Credentials warning */}
-                    {authStatus === 'success' && (!tenantId) && (
+                    {/* {authStatus === 'success' && (!tenantId) && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
                         <p className="text-red-600 text-sm">Tenant ID is required to load and use apps.</p>
                       </div>
-                    )}
+                    )} */}
                     
                     {/* Space ID warning */}
-                    {authStatus === 'success' && (!spaceId?.trim()) && (
+                    {/* {authStatus === 'success' && (!spaceId?.trim()) && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
                         <p className="text-red-600 text-sm">Space ID is required to load and use tools and apps.</p>
                       </div>
-                    )}
+                    )} */}
                     
                     {/* Credentials properly set confirmation */}
                   

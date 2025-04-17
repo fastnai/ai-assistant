@@ -1,12 +1,14 @@
 import React from "react";
 import { Button } from "./common/buttons/button";
 import classNames from "classnames";
+import { Tooltip } from "react-tooltip";
 
 interface Tab {
   id: string;
   name: string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 interface ToggleTabsProps {
@@ -30,29 +32,49 @@ export const ToggleTabs: React.FC<ToggleTabsProps> = ({
         ${className}`}
     >
       {tabs?.map((tab) => {
+        const tooltipId = `tab-tooltip-${tab.id}`;
         return (
-          <Button
-            key={tab?.id}
-            onClick={() => {
-              if (!tab.disabled) {
-                setSelectedTab(tab?.id);
-                handleOnClick();
-              }
-            }}
-            variant="text"
-            disabled={tab.disabled}
-            className={classNames(
-              "w-full flex justify-center items-center px-2 py-2 border-0 font-[500] text-[12px] gap-2",
-              {
-                "text-[#7375F2] bg-white shadow-md active:text-[#7375F2] hover:bg-white": selectedTab === tab.id,
-                "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent": tab.disabled,
-                "bg-transparent text-gray-500 hover:bg-white": selectedTab !== tab.id && !tab.disabled
-              }
+          <React.Fragment key={tab?.id}>
+            <Button
+              data-tooltip-id={tab.disabled && tab.disabledReason ? tooltipId : undefined}
+              onClick={() => {
+                if (!tab.disabled) {
+                  setSelectedTab(tab?.id);
+                  handleOnClick();
+                }
+              }}
+              variant="text"
+              disabled={tab.disabled}
+              className={classNames(
+                "w-full flex justify-center items-center px-2 py-2 border-0 font-[500] text-[12px] gap-2",
+                {
+                  "text-indigo-700 bg-white shadow-md active:text-indigo-700 hover:bg-white": selectedTab === tab.id,
+                  "bg-transparent text-gray-400 cursor-not-allowed hover:bg-transparent": tab.disabled,
+                  "bg-transparent text-gray-500 hover:bg-white": selectedTab !== tab.id && !tab.disabled
+                }
+              )}
+            >
+              {tab?.icon}
+              {tab?.name}
+            </Button>
+            {tab.disabled && tab.disabledReason && (
+              <Tooltip
+                id={tooltipId}
+                place="bottom"
+                style={{
+                  borderRadius: "4px",
+                  border: "1px solid #000",
+                  backgroundColor: "#000",
+                  color: "#fff",
+                  zIndex: 30,
+                  fontSize: "12px",
+                  padding: "4px 8px",
+                  maxWidth: "200px"
+                }}
+                content={tab.disabledReason}
+              />
             )}
-          >
-            {tab?.icon}
-            {tab?.name}
-          </Button>
+          </React.Fragment>
         );
       })}
     </div>

@@ -102,21 +102,23 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   };
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 relative`}>
+     
       <div
-        className={`rounded-xl px-5 py-3.5 max-w-[90%] ${
+        className={`rounded-xl px-5 py-3.5 max-w-[60%] relative ${
           isUser
             ? 'bg-[#e8eaff] text-indigo-700'
             : 'bg-gray-100 text-gray-800'
         } ${message.isStreaming ? 'border-l-4 border-[#A1A3F7] animate-pulse' : ''}
         ${message.isToolExecution ? 'border border-slate-200 bg-slate-50 italic' : ''}
-        ${showRunToolButton ? 'border-2 border-[#A1A3F7]' : ''} shadow-sm`}
+        ${showRunToolButton ? 'border-2 border-[#A1A3F7]' : ''} shadow-sm `}
       >
-        <div className="flex items-center gap-2 mb-1.5">
+        
+        <div className="flex items-center gap-2 mb-1.5 relative z-10">
           <span className={`font-medium ${isUser ? 'text-indigo-700' : 'text-slate-700'}`}>
             {isUser ? 'You' : 'Assistant'}
           </span>
-          <span className={`text-xs ${isUser ? 'text-indigo-500/80' : 'text-slate-500/80'}`}>
+          <span className={`text-xs ${isUser ? 'text-[#5B5EF0]' : 'text-slate-500/80'}`}>
             {new Date(message.timestamp).toLocaleTimeString()}
           </span>
           {message.isStreaming && (
@@ -127,9 +129,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         </div>
 
         {/* Render content as markdown for non-user messages, plain text for user */}
-        <div className={`markdown-content ${isUser ? 'text-indigo-700' : 'text-slate-800'}`}>
+        <div className={`markdown-content w-full break-words overflow-hidden ${isUser ? 'text-indigo-700' : 'text-slate-800'}`}>
           {isUser ? (
-            <div className="whitespace-pre-wrap">{message.content}</div>
+            <div className="whitespace-pre-wrap overflow-wrap-anywhere ">{message.content}</div>
           ) : (
             <ReactMarkdown 
               remarkPlugins={[remarkGfm]} 

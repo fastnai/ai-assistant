@@ -34,7 +34,7 @@ export const getTools = async (useCase: string, apiKey: string, spaceId: string)
       },
     }, {
       headers: {
-        'x-fastn-api-key': apiKey,
+        // 'x-fastn-api-key': apiKey,
         'x-fastn-space-id': spaceId,
       }
     });
@@ -106,7 +106,7 @@ export const executeTool = async (
     
     // Prepare headers with optional tenant ID
     const headers: Record<string, string> = {
-      'x-fastn-api-key': apiKey,
+      // 'x-fastn-api-key': apiKey,
       'x-fastn-space-id': spaceId,
     };
     
@@ -138,7 +138,7 @@ export const executeTool = async (
         
         // Prepare headers with optional tenant ID for retry
         const headers: Record<string, string> = {
-          'x-fastn-api-key': apiKey,
+          // 'x-fastn-api-key': apiKey,
           'x-fastn-space-id': spaceId,
         };
         
