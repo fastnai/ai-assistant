@@ -273,7 +273,7 @@ function App() {
       setIsRefreshing(true);
       setError(null);
       // Pass apiKey and spaceId to getTools
-      const tools = await getTools('chat', apiKey, spaceId);
+      const tools = await getTools('chat', apiKey, spaceId, tenantId);
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
