@@ -5,13 +5,14 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   disabled?: boolean;
   className?: string;
+  authStatus: string;
 }
 
 export interface ChatInputHandles {
   resetMessage: () => void;
 }
 
-export const ChatInput = forwardRef<ChatInputHandles, ChatInputProps>(({ onSendMessage, disabled, className }, ref) => {
+export const ChatInput = forwardRef<ChatInputHandles, ChatInputProps>(({ onSendMessage, disabled, className, authStatus }, ref) => {
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -44,7 +45,7 @@ export const ChatInput = forwardRef<ChatInputHandles, ChatInputProps>(({ onSendM
     <form onSubmit={handleSubmit} className={`flex gap-2 w-full ${className || ''}`}>
       <div className="flex items-center bg-[#F6F6FE] rounded-[6px] w-full">
         <div className="relative flex-1">
-          {disabled && (
+          {disabled && authStatus !== 'success' &&(
             <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 hover:opacity-100">
               <div className="bg-black text-white text-xs py-1 px-2 rounded shadow-lg">
                 Login to send messages
