@@ -1524,42 +1524,23 @@ Result: ${JSON.stringify(response)}`,
                 <Trash2 className="w-5 h-5" />
               </button>
             </div>}
-              {(authStatus !== 'success' || !!connectorsDataNull || availableTools.length === 0) ? (
+              {conversation.messages.length === 0 ? (
                 <div className="flex flex-col h-full items-center justify-center text-gray-600 text-[17px]">
-                  
-                    <div className="max-w-sm">
-                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                        <div className={`w-5 h-5 border ${authStatus === 'success' ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
-                          {authStatus === 'success' && <span className="text-white">✓</span>}
-                        </div>
-                        Create an account
-                      </p>
-                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                        <div className={`w-5 h-5 border ${
-                          !!connectorsDataNull ? 'border-indigo-300' : // No connectors, show empty box
-                          connectorsDataNull === false ? 'bg-indigo-600 border-indigo-700' : // Connectors available, show checkmark
-                          'border-indigo-300' // Initial state, show empty box
-                        } rounded mr-2 flex items-center justify-center`}>
-                          {connectorsDataNull === false && <span className="text-white">✓</span>}
-                        </div>
-                        Activate connectors (via MCP)
-                      </p>
-                      <p className="font-[600] flex items-center text-indigo-700">
-                        <div className={`w-5 h-5 border ${availableTools.length > 0 ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
-                          {availableTools.length > 0 && <span className="text-white">✓</span>}
-                        </div>
-                        Select your tools
-                      </p>
+                  {authStatus !== 'success' ? (
+                    <div className="max-w-sm text-center">
+                      <p>Please log in to start a conversation</p>
                     </div>
-                  
-                    
-                
-                </div>
-              ) : (authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0) ? (
-              <div className="flex flex-col h-full items-center justify-center text-indigo-700 text-[17px]">
-              <div className="max-w-sm">
+                  ) : availableTools.length === 0 ? (
+                    <div className="max-w-sm text-center">
+                      <p>No tools available</p>
+                    </div>
+                  ) : (
+                    <div className="max-w-sm text-center text-indigo-700">
                       <p>Send a message to start the conversation</p>
-                    </div></div>) : (
+                    </div>
+                  )}
+                </div>
+              ) : (
                 conversation.messages.map((message) => (
                   <ChatMessage 
                     key={message.id} 
