@@ -188,11 +188,8 @@ export const getConnectors = async (spaceId: string, tenantId: string): Promise<
   }
 };
 
-export const getTools = async (useCase: string, apiKey: string, spaceId: string, tenantId?: string): Promise<Tool[]> => {
-  if (!apiKey || !spaceId) {
-    console.warn('API Key or Space ID is missing. Cannot fetch tools.');
-    return [];
-  }
+export const getTools = async (useCase: string, spaceId: string, tenantId?: string, authToken: string): Promise<Tool[]> => {
+
   try {
     const response = await api.post('/api/ucl/getTools', {
       input: {
@@ -204,6 +201,8 @@ export const getTools = async (useCase: string, apiKey: string, spaceId: string,
         // 'x-fastn-api-key': apiKey,
         'x-fastn-space-id': spaceId,
         'x-fastn-space-tenantid': tenantId || '',
+        'x-fastn-custom-auth': 'true',
+        'authorization': `Bearer ${authToken}`
       }
     });
     return response.data || [];
@@ -249,11 +248,10 @@ export const executeTool = async (
   apiKey: string,
   spaceId: string,
   availableTools: Tool[],
-  tenantId?: string
+  tenantId?: string,
+  authToken: string
 ) => {
-  if (!apiKey || !spaceId) {
-    throw new Error('API Key or Space ID is missing. Cannot execute tool.');
-  }
+
   try {
     let tool = availableTools.find(t => t.actionId === actionId);
     
@@ -306,7 +304,9 @@ export const executeTool = async (
         const headers: Record<string, string> = {
           // 'x-fastn-api-key': apiKey,
           'x-fastn-space-id': spaceId,
-         'x-fastn-space-tenantid' :tenantId ||''
+         'x-fastn-space-tenantid' :tenantId ||'',
+         'x-fastn-custom-auth': 'true',
+         'authorization': `Bearer ${authToken}`
         };
         
         // Add tenant ID to headers if provided
