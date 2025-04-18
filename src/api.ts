@@ -204,6 +204,7 @@ export const getTools = async (useCase: string, spaceId: string, tenantId?: stri
       headers: {
         'x-fastn-space-id': spaceId,
         'x-fastn-space-tenantid': tenantId || '',
+        'x-fastn-custom-auth': 'true',
       }
     });
     return response.data || [];
