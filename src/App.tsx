@@ -1526,8 +1526,8 @@ Result: ${JSON.stringify(response)}`,
                         Create an account
                       </p>
                       <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                      <div className={`w-5 h-5 border ${!connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
-                      {connectorsDataNull && <span className="text-white">✓</span>}
+                      <div className={`w-5 h-5 border ${connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
+                      {!connectorsDataNull && <span className="text-white">✓</span>}
                         </div>
                         Activate connectors (via MCP)
                       </p>
