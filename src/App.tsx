@@ -290,8 +290,8 @@ function App() {
       
       // Calculate and set token expiry times
       const now = Date.now();
-      setTokenExpiryTime(now + (parseInt(expiresIn) * 60 * 1000)); // Convert minutes to milliseconds
-      setRefreshTokenExpiryTime(now + (parseInt(refreshExpiresIn) * 60 * 1000)); // Convert minutes to milliseconds
+      setTokenExpiryTime(now + (parseInt(String(expiresIn)) * 1000)); // Convert seconds to milliseconds
+      setRefreshTokenExpiryTime(now + (parseInt(String(refreshExpiresIn)) * 1000)); // Convert seconds to milliseconds
       
       setAuthToken(accessToken);
       setRefreshToken(refreshTokenValue);
@@ -893,21 +893,18 @@ Result: ${JSON.stringify(response)}`,
     try {
       console.log('Refreshing access token...');
       
-      // Updated to use same endpoint and format as initial token fetch
-      const response = await fetch('https://live.fastn.ai/api/v1/generateFastnAccessToken', {
+      // Use the direct token refresh endpoint with URLSearchParams
+      const formData = new URLSearchParams();
+      formData.append('grant_type', 'refresh_token');
+      formData.append('client_id', 'fastn-app');
+      formData.append('refresh_token', refreshToken);
+      
+      const response = await fetch('https://live.fastn.ai/auth/realms/fastn/protocol/openid-connect/token', {
         method: 'POST',
         headers: {
-          'x-fastn-api-key': "21112588-769a-4311-a359-cf094bee5382",
-          'Content-Type': 'application/json',
-          'x-fastn-space-id': "43aea445-7772-4e45-b1e8-548b96c4bf2b",
-          'x-fastn-space-tenantid': '',
-          'stage': 'LIVE'
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: JSON.stringify({ 
-          input: {
-            refresh_token: refreshToken
-          } 
-        })
+        body: formData
       });
 
       if (!response.ok) {
@@ -947,17 +944,19 @@ Result: ${JSON.stringify(response)}`,
       
       // Update tokens and expiry times
       setAuthToken(data.access_token);
-      setRefreshToken(data.refresh_token || refreshToken); // Keep old refresh token if not provided
+      if (data.refresh_token) {
+        setRefreshToken(data.refresh_token);
+      }
       
-      // Calculate and set token expiry times
+      // Calculate and set token expiry times - note that values are in seconds
       const now = Date.now();
-      const expiresIn = data.expires_in || 60; // Default to 60 minutes if not provided
-      const refreshExpiresIn = data.refresh_expires_in || 1440; // Default to 1 day if not provided
+      const expiresIn = data.expires_in || 300; // Default to 5 minutes
+      const refreshExpiresIn = data.refresh_expires_in || 3600; // Default to 1 hour
       
-      const newTokenExpiryTime = now + (parseInt(expiresIn) * 60 * 1000);
-      const newRefreshTokenExpiryTime = now + (parseInt(refreshExpiresIn) * 60 * 1000);
+      const newTokenExpiryTime = now + (expiresIn * 1000); // Convert seconds to milliseconds
+      const newRefreshTokenExpiryTime = now + (refreshExpiresIn * 1000); // Convert seconds to milliseconds
       
-      console.log(`New token expires in ${expiresIn} minutes`);
+      console.log(`New token expires in ${expiresIn} seconds`);
       setTokenExpiryTime(newTokenExpiryTime);
       setRefreshTokenExpiryTime(newRefreshTokenExpiryTime);
       
@@ -983,8 +982,16 @@ Result: ${JSON.stringify(response)}`,
       return false;
     }
     
-    // If token is valid, return true
-    if (tokenExpiryTime > 0 && Date.now() < tokenExpiryTime) {
+    const now = Date.now();
+    const timeUntilExpiry = tokenExpiryTime - now;
+    
+    // If token is valid and not about to expire, return true
+    if (tokenExpiryTime > 0 && timeUntilExpiry > 0) {
+      // If token will expire in less than 4 minutes (240000 ms), proactively refresh it
+      if (timeUntilExpiry < 240000) {
+        console.log(`Token will expire in ${Math.floor(timeUntilExpiry / 1000)} seconds - proactively refreshing`);
+        return await refreshAccessToken();
+      }
       return true;
     }
     
@@ -997,23 +1004,9 @@ Result: ${JSON.stringify(response)}`,
     if (authStatus === 'success' && authToken) {
       console.log('Setting up token refresh interval check');
       const interval = setInterval(async () => {
-        // Check if access token is about to expire (within 30 seconds)
-        if (tokenExpiryTime > 0 && Date.now() > tokenExpiryTime - 30000) {
-          console.log('Token is about to expire, refreshing...');
-          await refreshAccessToken();
-        } else {
-          // Force token validation every minute regardless of expiry time
-          const currentTime = Date.now();
-          const tokenAge = tokenExpiryTime - currentTime;
-          console.log(`Token health check: ${Math.floor(tokenAge / 1000)}s until expiry`);
-          
-          // If token is older than 4 minutes, refresh it proactively
-          if (tokenAge < 60000) {
-            console.log('Proactively refreshing token');
-            await refreshAccessToken();
-          }
-        }
-      }, 10000); // Check every 10 seconds
+        // Check if token is valid and if it needs to be refreshed
+        await ensureValidToken();
+      }, 240000); // Check every 30 seconds
       
       return () => {
         console.log('Clearing token refresh interval');
@@ -1430,8 +1423,8 @@ Result: ${JSON.stringify(response)}`,
                         Create an account
                       </p>
                       <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                        <div className={`w-5 h-5 border ${!connectorsDataNull ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
-                          {!connectorsDataNull && <span className="text-white">✓</span>}
+                      <div className={`w-5 h-5 border ${!connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
+                      {connectorsDataNull && <span className="text-white">✓</span>}
                         </div>
                         Activate connectors (via MCP)
                       </p>
