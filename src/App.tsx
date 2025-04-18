@@ -32,7 +32,11 @@ function App() {
   const [spaceId, setSpaceId] = useState<string>(() => localStorage.getItem('fastnSpaceId') || '');
   // State for model selection, loaded from localStorage
   const [tenantId, setTenantId] = useState<string>(() => localStorage.getItem('fastnTenantId') || '');
-  const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('fastnSelectedModel') || 'claude-3-7-sonnet-20250219');
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    // Force reset to gpt-4o
+    localStorage.setItem('fastnSelectedModel', 'gpt-4o');
+    return 'gpt-4o';
+  });
   // State for username and password
   const [username, setUsername] = useState<string>(() => localStorage.getItem('fastnUsername') || '');
   const [password, setPassword] = useState<string>(() => localStorage.getItem('fastnPassword') || '');
