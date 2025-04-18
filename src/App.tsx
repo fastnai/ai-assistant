@@ -173,6 +173,16 @@ function App() {
     chatInputRef.current?.resetMessage();
     // Expand the auth box
     setAuthBoxExpanded(true);
+    // Clear tools and apps data
+    setAvailableTools([]);
+    setWidgetMounted(false);
+    setWidgetKey(prevKey => prevKey + 1);
+    setWidgetResponses([]);
+    setConnectorsDataNull(true);
+    // Switch to config view
+    setSidebarView('config');
+    // Clear conversation
+    setConversation({ messages: [] });
     console.log('User logged out');
   };
 
@@ -194,6 +204,8 @@ function App() {
         // Also load widgets if tenant ID is available
         if (tenantId?.trim()) {
           loadWidgets();
+          // Navigate to apps tab if both Space ID and Tenant ID are provided
+          setSidebarView('apps');
         }
       }, 100);
     }
@@ -213,6 +225,8 @@ function App() {
       // Use setTimeout to allow state update to complete first
       setTimeout(() => {
         loadWidgets();
+        // Navigate to apps tab when both IDs are provided
+        setSidebarView('apps');
       }, 100);
     }
   };
@@ -769,15 +783,34 @@ Result: ${JSON.stringify(response)}`,
   
   // Handle API errors related to authentication
   const handleApiError = (error: any) => {
+    // Extract status code if it's an axios error with response
+    const status = error.response?.status || error.status;
+    const message = error.message || '';
+    
     // Check if the error is an authentication error
-    if (error.status === 401 || error.message?.includes('auth') || error.message?.includes('token')) {
+    const isAuthError = status === 401 || 
+                        message.includes('auth') || 
+                        message.includes('token') ||
+                        message.includes('unauthorized') ||
+                        message.includes('unauthenticated');
+    
+    if (isAuthError) {
       console.error('Authentication error detected:', error);
       
       // Attempt to refresh the token
-      refreshAccessToken().catch(() => {
-        // If refresh fails, logout the user
-        handleLogout();
-      });
+      refreshAccessToken()
+        .then(success => {
+          console.log(`Token refresh ${success ? 'succeeded' : 'failed'} after API error`);
+          if (!success) {
+            // If refresh fails, logout the user
+            console.error('Token refresh failed, logging out user');
+            handleLogout();
+          }
+        })
+        .catch(refreshError => {
+          console.error('Error during token refresh after API error:', refreshError);
+          handleLogout();
+        });
     }
     return error;
   };
@@ -878,28 +911,68 @@ Result: ${JSON.stringify(response)}`,
       });
 
       if (!response.ok) {
-        console.error('Failed to refresh token:', response.status);
-        handleLogout();
+        console.error(`Failed to refresh token: ${response.status} ${response.statusText}`);
+        // Try to get the error details from the response
+        try {
+          const errorData = await response.json();
+          console.error('Token refresh error details:', errorData);
+        } catch (parseError) {
+          console.error('Could not parse error response');
+        }
+        
+        // If status is 401, the refresh token itself is invalid
+        if (response.status === 401) {
+          console.error('Refresh token is invalid, logging out');
+          handleLogout();
+          return false;
+        }
+        
+        // For other errors, we might want to retry or handle differently
+        if (response.status >= 500) {
+          console.error('Server error during token refresh, might retry later');
+        } else {
+          handleLogout();
+        }
         return false;
       }
 
       const data = await response.json();
+      console.log('Token refresh response received');
+      
+      if (!data.access_token) {
+        console.error('No access token in refresh response');
+        handleLogout();
+        return false;
+      }
       
       // Update tokens and expiry times
       setAuthToken(data.access_token);
-      setRefreshToken(data.refresh_token);
+      setRefreshToken(data.refresh_token || refreshToken); // Keep old refresh token if not provided
       
       // Calculate and set token expiry times
       const now = Date.now();
-      setTokenExpiryTime(now + (parseInt(data.expires_in) * 60 * 1000)); // Convert minutes to milliseconds
-      setRefreshTokenExpiryTime(now + (parseInt(data.refresh_expires_in) * 60 * 1000)); // Convert minutes to milliseconds
+      const expiresIn = data.expires_in || 60; // Default to 60 minutes if not provided
+      const refreshExpiresIn = data.refresh_expires_in || 1440; // Default to 1 day if not provided
+      
+      const newTokenExpiryTime = now + (parseInt(expiresIn) * 60 * 1000);
+      const newRefreshTokenExpiryTime = now + (parseInt(refreshExpiresIn) * 60 * 1000);
+      
+      console.log(`New token expires in ${expiresIn} minutes`);
+      setTokenExpiryTime(newTokenExpiryTime);
+      setRefreshTokenExpiryTime(newRefreshTokenExpiryTime);
       
       console.log('Access token refreshed successfully');
       return true;
     } catch (error) {
       console.error('Error refreshing token:', error);
-      handleLogout();
-      return false;
+      // Don't immediately logout on network errors - might be temporary
+      if (error instanceof TypeError && error.message.includes('network')) {
+        console.log('Network error during token refresh, will try again later');
+        return false;
+      } else {
+        handleLogout();
+        return false;
+      }
     }
   };
 
@@ -922,17 +995,32 @@ Result: ${JSON.stringify(response)}`,
   // Check token validity periodically
   useEffect(() => {
     if (authStatus === 'success' && authToken) {
+      console.log('Setting up token refresh interval check');
       const interval = setInterval(async () => {
         // Check if access token is about to expire (within 30 seconds)
         if (tokenExpiryTime > 0 && Date.now() > tokenExpiryTime - 30000) {
           console.log('Token is about to expire, refreshing...');
           await refreshAccessToken();
+        } else {
+          // Force token validation every minute regardless of expiry time
+          const currentTime = Date.now();
+          const tokenAge = tokenExpiryTime - currentTime;
+          console.log(`Token health check: ${Math.floor(tokenAge / 1000)}s until expiry`);
+          
+          // If token is older than 4 minutes, refresh it proactively
+          if (tokenAge < 60000) {
+            console.log('Proactively refreshing token');
+            await refreshAccessToken();
+          }
         }
       }, 10000); // Check every 10 seconds
       
-      return () => clearInterval(interval);
+      return () => {
+        console.log('Clearing token refresh interval');
+        clearInterval(interval);
+      };
     }
-  }, [authStatus, authToken, tokenExpiryTime]);
+  }, [authStatus, authToken, tokenExpiryTime, refreshToken]); // Add refreshToken to dependencies
 
   // Effect to check connector availability when tenantId or spaceId changes
   useEffect(() => {
@@ -1331,28 +1419,38 @@ Result: ${JSON.stringify(response)}`,
                 <Trash2 className="w-5 h-5" />
               </button>
             </div>}
-              {conversation.messages.length === 0 ? (
+              {(authStatus !== 'success'  || connectorsDataNull || availableTools.length === 0 )? (
                 <div className="flex flex-col h-full items-center justify-center text-gray-600 text-[17px]">
-                  {authStatus !== 'success' ? (
-                    <div className="text-center">
-                      <p className="font-[600] mb-2">1. Create an account</p>
-                      <p className="font-[600] mb-2">2. Activate connectors (via MCP)</p>
-                      <p className="font-[600]">3. Select your tools</p>
+                  
+                    <div className="max-w-sm">
+                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${authStatus === 'success' ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {authStatus === 'success' && <span className="text-white">✓</span>}
+                        </div>
+                        Create an account
+                      </p>
+                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${!connectorsDataNull ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {!connectorsDataNull && <span className="text-white">✓</span>}
+                        </div>
+                        Activate connectors (via MCP)
+                      </p>
+                      <p className="font-[600] flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${availableTools.length > 0 ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {availableTools.length > 0 && <span className="text-white">✓</span>}
+                        </div>
+                        Select your tools
+                      </p>
                     </div>
-                  ) : availableTools.length === 0 ? (
-                    <div className="text-center">
-                      <p className="font-[600] mb-2">2. Activate connectors (via MCP)</p>
-                      <p className="font-[600]">3. Select your tools</p>
-                    </div>
-                  ) : connectorsDataNull ? (
-                    <div className="text-center">
-                      <p className="font-[600]">3. Select your tools</p>
-                    </div>
-                  ) : (
-                    <p>Send a message to start the conversation</p>
-                  )}
+                  
+                    
+                
                 </div>
-              ) : (
+              ) :(authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0)? (
+              <div className="flex flex-col h-full items-center justify-center text-indigo-700 text-[17px]">
+              <div className="max-w-sm">
+                      <p>Send a message to start the conversation</p>
+                    </div></div>): (
                 conversation.messages.map((message) => (
                   <ChatMessage 
                     key={message.id} 
@@ -1401,7 +1499,7 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-indigo-100 text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-[#e8eaff] text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
           style={{ right: sidebarVisible ? '500px' : '0' }}
         >
           {sidebarVisible ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
@@ -1522,9 +1620,9 @@ Result: ${JSON.stringify(response)}`,
                           <Wrench className="w-8 h-8 text-indigo-600" />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-800">No Tools Available</h3>
+                        
                         <p className="text-gray-600 max-w-md">
-                          Tools enable the AI to take actions on your behalf — like <span className="font-semibold">sending messages in Slack</span> or <span className="font-semibold">updating records in your CRM</span>.
-                          <br />
+                          
                           <span className="block mt-3">To set them up, go to the <span className="font-semibold">MCP page</span>, select the relevant <span className="font-semibold">connector</span>, and choose the tools you want to enable.</span>
                         </p>
                         <div className="flex flex-wrap gap-3 justify-center mt-2">
@@ -1535,13 +1633,7 @@ Result: ${JSON.stringify(response)}`,
                           >
                              Add Tools
                           </a>
-                          <a 
-                            className="px-4 py-2 border border-indigo-600 text-indigo-600 rounded-md hover:bg-indigo-50 transition-colors flex items-center" 
-                            href="https://docs.fastn.ai/docs/guide/connect-your-mcp-client/" 
-                            target="_blank"
-                          >
-                           Learn More
-                          </a>
+                          
                         </div>
                       </div>
                     )
@@ -1570,9 +1662,9 @@ Result: ${JSON.stringify(response)}`,
                                 <LayoutGrid className="w-8 h-8 text-indigo-600" />
                               </div>
                               <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
+                              
                               <p className="text-gray-600 max-w-md">
-                                Apps act as widgets that enable multi-tenant connections to your data sources and tools.
-                                <br />
+                               
                                 <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
                               </p>
                               <div className="flex flex-wrap gap-3 justify-center mt-2">
@@ -1583,13 +1675,7 @@ Result: ${JSON.stringify(response)}`,
                                 >
                                   Go to MCP
                                 </a>
-                                <a 
-                                  className="px-4 py-2 border border-indigo-600 text-indigo-600 rounded-md hover:bg-indigo-50 transition-colors flex items-center" 
-                                  href="https://docs.fastn.ai/docs/guide/connect-your-mcp-client/" 
-                                  target="_blank"
-                                >
-                                 Learn More
-                                </a>
+                               
                               </div>
                             </div>
                           ) : (
@@ -1680,66 +1766,6 @@ Result: ${JSON.stringify(response)}`,
                   <div className="space-y-3">
                     {/* Authentication section - always visible */}
                     
-                    
-                    {/* API Configuration - only visible when logged in */}
-                    {authStatus === 'success' && (
-                      <AuthBox 
-                        header={
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold">API Configuration</h3>
-                          </div>
-                        }
-                        body={
-                          <div className="space-y-3">
-                            <div>
-                              <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
-                              </label>
-                              <input
-                                type="text"
-                                id="config-spaceId"
-                                value={spaceId}
-                                onChange={handleSpaceIdChange}
-                                placeholder="Enter your Space ID"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label htmlFor="config-tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
-                              </label>
-                              <input
-                                type="text"
-                                id="config-tenantId"
-                                value={tenantId}
-                                onChange={handleTenantIdChange}
-                                placeholder="Enter your Tenant ID"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label htmlFor="config-selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
-                              </label>
-                              <select
-                                id="config-selectedModel"
-                                value={selectedModel}
-                                onChange={(e) => setSelectedModel(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                              >
-                                {modelsWithToolCalls.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        }
-                        isCollapsible={true}
-                        defaultExpanded={true}
-                      />
-                    )}
                     <AuthBox 
                       header={
                         <div className="flex items-center justify-between w-full">
@@ -1866,6 +1892,66 @@ Result: ${JSON.stringify(response)}`,
                       isExpanded={authBoxExpanded}
                       onToggle={(expanded) => setAuthBoxExpanded(expanded)}
                     />
+                    {/* API Configuration - only visible when logged in */}
+                    {authStatus === 'success' && (
+                      <AuthBox 
+                        header={
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold">API Configuration</h3>
+                          </div>
+                        }
+                        body={
+                          <div className="space-y-3">
+                            <div>
+                              <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
+                              </label>
+                              <input
+                                type="text"
+                                id="config-spaceId"
+                                value={spaceId}
+                                onChange={handleSpaceIdChange}
+                                placeholder="Enter your Space ID"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="config-tenantId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Tenant ID
+                              </label>
+                              <input
+                                type="text"
+                                id="config-tenantId"
+                                value={tenantId}
+                                onChange={handleTenantIdChange}
+                                placeholder="Enter your Tenant ID"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor="config-selectedModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> Selected Model
+                              </label>
+                              <select
+                                id="config-selectedModel"
+                                value={selectedModel}
+                                onChange={(e) => setSelectedModel(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              >
+                                {modelsWithToolCalls.map((model) => (
+                                  <option key={model.id} value={model.id}>
+                                    {model.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        }
+                        isCollapsible={true}
+                        defaultExpanded={true}
+                      />
+                    )}
+                    
                     
                     {/* Credentials warning */}
                     {/* {authStatus === 'success' && (!tenantId) && (
