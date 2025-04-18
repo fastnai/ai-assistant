@@ -178,7 +178,7 @@ function App() {
     setWidgetMounted(false);
     setWidgetKey(prevKey => prevKey + 1);
     setWidgetResponses([]);
-    setConnectorsDataNull(false);
+    setConnectorsDataNull(null);
     // Switch to config view
     setSidebarView('config');
     // Clear conversation
