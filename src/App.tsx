@@ -1791,6 +1791,7 @@ Result: ${JSON.stringify(response)}`,
                             />
                           )}
                           
+                          
                           {/* Response display panel */}
                           {/* {widgetResponses.length > 0 && (
                             <div className="mt-4 border border-gray-200 rounded-md bg-gray-50 p-2">
