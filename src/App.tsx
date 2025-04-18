@@ -54,7 +54,7 @@ function App() {
   const [sidebarView, setSidebarView] = useState<'tools' | 'apps' | 'config'>('config');
   const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
   const [widgetResponses, setWidgetResponses] = useState<any[]>([]);
-  const [connectorsDataNull, setConnectorsDataNull] = useState<boolean>(false);
+  const [connectorsDataNull, setConnectorsDataNull] = useState<boolean | null>(null);
   const widgetIframeRef = useRef<HTMLIFrameElement | null>(null);
   const auth = useAuth();
   // Available models that support tool calls
@@ -178,7 +178,7 @@ function App() {
     setWidgetMounted(false);
     setWidgetKey(prevKey => prevKey + 1);
     setWidgetResponses([]);
-    setConnectorsDataNull(true);
+    setConnectorsDataNull(false);
     // Switch to config view
     setSidebarView('config');
     // Clear conversation
@@ -429,10 +429,10 @@ function App() {
       
       // Force remount of the FastnWidget component
       setWidgetMounted(false);
-      setTimeout(() => {
-        setWidgetKey(prevKey => prevKey + 1);
-        setWidgetMounted(true);
-      }, 3000); // Check after 3 seconds
+      // setTimeout(() => {
+      //   setWidgetKey(prevKey => prevKey + 1);
+      //   setWidgetMounted(true);
+      // }, 3000); // Check after 3 seconds
       
     } catch (error) {
       console.error('Error loading apps:', error);
@@ -858,13 +858,18 @@ Result: ${JSON.stringify(response)}`,
             console.log('Widget response:', event.data);
             
             // Check specifically for connectors data being null or empty array
-            if (event.data.type === 'CONNECTORS_DATA' && (
-                event.data.data === null || 
-                (Array.isArray(event.data.data) && event.data.data.length === 0) ||
-                (typeof event.data.data === 'object' && Object.keys(event.data.data).length === 0)
-              )) {
-              console.log('Connectors data is null or empty array');
-              setConnectorsDataNull(true);
+            if (event.data.type === 'CONNECTORS_DATA') {
+              if (
+                  event.data.data === null || 
+                  (Array.isArray(event.data.data) && event.data.data.length === 0) ||
+                  (typeof event.data.data === 'object' && Object.keys(event.data.data).length === 0)
+                ) {
+                console.log('Connectors data is null or empty array');
+                setConnectorsDataNull(true); // No connectors available
+              } else {
+                console.log('Connectors data is available');
+                setConnectorsDataNull(false); // Connectors are available
+              }
             }
             
             // No need to check for no_connector_found event here as we have a dedicated listener
@@ -1040,7 +1045,7 @@ Result: ${JSON.stringify(response)}`,
     // to determine connector availability
     if (tenantId && spaceId && authStatus === 'success' && authToken) {
       // Reset the state when changing tenant or space
-      setConnectorsDataNull(false);
+      // setConnectorsDataNull(false);
       
       if (sidebarView === 'apps') {
         console.log('Tenant/Space changed - will check for connectors via widget events');
@@ -1362,7 +1367,7 @@ Result: ${JSON.stringify(response)}`,
 
   // Function to simulate null connectors data
   const simulateNullConnectors = () => {
-    setConnectorsDataNull(true);
+    setConnectorsDataNull(true); // Set to true (no connectors)
     setWidgetResponses(prev => [
       ...prev, 
       { 
@@ -1398,7 +1403,7 @@ Result: ${JSON.stringify(response)}`,
     const handleMessage = (event: MessageEvent) => {
       if (event.data && typeof event.data === 'object' && event.data.eventType === "no_connector_found") {
         console.log('No connector found event detected in dedicated listener');
-        setConnectorsDataNull(true);
+        setConnectorsDataNull(true); // No connectors available
         
         // Show message for user by adding to widget responses
         setWidgetResponses(prev => [
@@ -1430,7 +1435,7 @@ Result: ${JSON.stringify(response)}`,
         // Handle explicit no_connector_found event
         if (event.data.eventType === "no_connector_found") {
           console.log('No connector found event detected in dedicated listener');
-          setConnectorsDataNull(true);
+          setConnectorsDataNull(true); // No connectors available
           
           // Show message for user by adding to widget responses
           setWidgetResponses(prev => [
@@ -1455,7 +1460,7 @@ Result: ${JSON.stringify(response)}`,
           
           if (isEmpty) {
             console.log('Empty connectors data detected in dedicated listener');
-            setConnectorsDataNull(true);
+            setConnectorsDataNull(true); // No connectors available
             
             // Add to widget responses
             setWidgetResponses(prev => [
@@ -1469,6 +1474,9 @@ Result: ${JSON.stringify(response)}`,
                 } 
               }
             ]);
+          } else {
+            console.log('Connectors data available in dedicated listener');
+            setConnectorsDataNull(false); // Connectors are available
           }
         }
       }
@@ -1479,6 +1487,7 @@ Result: ${JSON.stringify(response)}`,
       window.removeEventListener("message", handleConnectorEvents);
     };
   }, []);
+  console.log(connectorsDataNull)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
@@ -1515,7 +1524,7 @@ Result: ${JSON.stringify(response)}`,
                 <Trash2 className="w-5 h-5" />
               </button>
             </div>}
-              {(authStatus !== 'success'  || connectorsDataNull || availableTools.length === 0 )? (
+              {(authStatus !== 'success' || !!connectorsDataNull || availableTools.length === 0) ? (
                 <div className="flex flex-col h-full items-center justify-center text-gray-600 text-[17px]">
                   
                     <div className="max-w-sm">
@@ -1526,8 +1535,12 @@ Result: ${JSON.stringify(response)}`,
                         Create an account
                       </p>
                       <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                      <div className={`w-5 h-5 border ${connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
-                      {!connectorsDataNull && <span className="text-white">✓</span>}
+                        <div className={`w-5 h-5 border ${
+                          !!connectorsDataNull ? 'border-indigo-300' : // No connectors, show empty box
+                          connectorsDataNull === false ? 'bg-indigo-600 border-indigo-700' : // Connectors available, show checkmark
+                          'border-indigo-300' // Initial state, show empty box
+                        } rounded mr-2 flex items-center justify-center`}>
+                          {connectorsDataNull === false && <span className="text-white">✓</span>}
                         </div>
                         Activate connectors (via MCP)
                       </p>
@@ -1542,11 +1555,11 @@ Result: ${JSON.stringify(response)}`,
                     
                 
                 </div>
-              ) :(authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0)? (
+              ) : (authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0) ? (
               <div className="flex flex-col h-full items-center justify-center text-indigo-700 text-[17px]">
               <div className="max-w-sm">
                       <p>Send a message to start the conversation</p>
-                    </div></div>): (
+                    </div></div>) : (
                 conversation.messages.map((message) => (
                   <ChatMessage 
                     key={message.id} 
@@ -1752,7 +1765,7 @@ Result: ${JSON.stringify(response)}`,
                     <>
                       {widgetMounted && (
                         <>
-                          {connectorsDataNull ? (
+                          {!!connectorsDataNull ? (
                             <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
                               <div className="p-4 bg-indigo-100 rounded-full">
                                 <LayoutGrid className="w-8 h-8 text-indigo-600" />
@@ -1760,7 +1773,6 @@ Result: ${JSON.stringify(response)}`,
                               <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
                               
                               <p className="text-gray-600 max-w-md">
-                               
                                 <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
                               </p>
                               <div className="flex flex-wrap gap-3 justify-center mt-2">
@@ -1771,7 +1783,6 @@ Result: ${JSON.stringify(response)}`,
                                 >
                                   Go to MCP
                                 </a>
-                               
                               </div>
                             </div>
                           ) : (
@@ -1789,7 +1800,6 @@ Result: ${JSON.stringify(response)}`,
                                 border: 'none',
                                 borderRadius: '8px',
                               }}
-                             
                             />
                           )}
                           
