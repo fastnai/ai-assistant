@@ -228,7 +228,7 @@ function App() {
     if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
       const timeoutId = setTimeout(() => {
         loadTools();
-        loadWidgets();
+        // loadWidgets(); // Don't auto-load widgets
         // Navigate to apps tab if both Space ID and Tenant ID are provided
         setSidebarView('apps');
       }, 500); // 500ms debounce
@@ -1615,10 +1615,8 @@ Result: ${JSON.stringify(response)}`,
                       loadTools();
                     }
                     
-                    // Call loadWidgets when switching to apps tab
-                    if (id === 'apps' && authStatus === 'success') {
-                      loadWidgets();
-                    }
+                    // Remove automatic widget loading when switching to apps tab
+                    // User can use the refresh button if needed
                   }
                 }}
                 tabs={[
@@ -1774,7 +1772,7 @@ Result: ${JSON.stringify(response)}`,
                               tenantId={tenantId}
                               apiKey={apiKey}
                               theme="light"
-                              env="DRAFT"
+                              env="DRAFT&enableAIActionAgent=false"
                               style={{
                                 height: '100%',
                                 width: '100%',
