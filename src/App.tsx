@@ -16,6 +16,102 @@ function App() {
     const saved = localStorage.getItem('conversation');
     return saved ? JSON.parse(saved) : { messages: [] };
   });
+  
+  // Add global event listener for modal events
+  React.useEffect(() => {
+    console.log('Setting up global modal event listener');
+    
+    const handleModalEvents = (event: MessageEvent) => {
+      console.log('GLOBAL - Received message event:', event.type);
+      
+      try {
+        // Capture any event data
+        if (event.data) {
+          console.log('GLOBAL - Event data:', event.data);
+          
+          // Look for modal-related events in any form
+          const eventDataStr = JSON.stringify(event.data).toLowerCase();
+          if (
+            eventDataStr.includes('modal') || 
+            eventDataStr.includes('popup') || 
+            eventDataStr.includes('dialog') ||
+            eventDataStr.includes('open')
+          ) {
+            console.log('GLOBAL - Detected modal-related event!');
+            
+            // Force scroll to top immediately using multiple techniques
+            const scrollToTop = () => {
+              console.log('EXECUTING SCROLL TO TOP!');
+              
+              // Method 1: Window scroll
+              window.scrollTo(0, 0);
+              
+              // Method 2: Document elements
+              document.body.scrollTop = 0;
+              document.documentElement.scrollTop = 0;
+              
+              // Method 3: Find all scrollable elements and reset them
+              const scrollableElements = document.querySelectorAll('div, section, main, article, aside, nav');
+              scrollableElements.forEach(el => {
+                if (el instanceof HTMLElement) {
+                  el.scrollTop = 0;
+                }
+              });
+              
+              // Method 4: Focus on top element
+              const topElement = document.querySelector('body > *:first-child');
+              if (topElement instanceof HTMLElement) {
+                topElement.focus();
+              }
+              
+              // Method 5: Insert temporary element at top and scroll to it
+              const tempElement = document.createElement('div');
+              tempElement.id = 'temp-scroll-target';
+              tempElement.style.position = 'absolute';
+              tempElement.style.top = '0';
+              tempElement.style.left = '0';
+              tempElement.style.height = '1px';
+              tempElement.style.width = '1px';
+              
+              const existingTemp = document.getElementById('temp-scroll-target');
+              if (existingTemp) {
+                document.body.removeChild(existingTemp);
+              }
+              
+              document.body.insertBefore(tempElement, document.body.firstChild);
+              tempElement.scrollIntoView({ behavior: 'auto', block: 'start' });
+              
+              // Clean up temporary element after a delay
+              setTimeout(() => {
+                if (document.getElementById('temp-scroll-target')) {
+                  document.body.removeChild(tempElement);
+                }
+              }, 1000);
+            };
+            
+            // Execute immediately
+            scrollToTop();
+            
+            // And also with delays to catch after modal rendering
+            for (let delay of [100, 300, 500, 1000]) {
+              setTimeout(scrollToTop, delay);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('GLOBAL - Error handling message event:', error);
+      }
+    };
+    
+    // Add global event listener
+    window.addEventListener('message', handleModalEvents);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('message', handleModalEvents);
+    };
+  }, []); // Empty dependency array means this only runs once
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentJson, setCurrentJson] = useState<any>(null);
@@ -851,22 +947,84 @@ Result: ${JSON.stringify(response)}`,
     if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
       setWidgetMounted(true);
       
+      // Debug all messages to find modal-related events
+      const handleAllMessages = (event: MessageEvent) => {
+        if (event.data) {
+          
+          // Look for any modal-related keywords in the event data
+          const eventStr = JSON.stringify(event.data).toLowerCase();
+          if (eventStr.includes('modal') || eventStr.includes('popup') || eventStr.includes('dialog')) {
+           
+            // Attempt to scroll to top
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            
+            // Try scrolling with a timeout
+            setTimeout(() => {
+              window.scrollTo(0, 0);
+              document.body.scrollTop = 0;
+              document.documentElement.scrollTop = 0;
+            }, 300);
+          }
+        }
+      };
+      
+      // Add listener for all messages to debug
+      window.addEventListener('message', handleAllMessages);
+      
       // Set up window message listener to capture widget responses
       const handleWidgetMessage = (event: MessageEvent) => {
         try {
-          // Log all messages from potential widget origin
-          console.log('Received window message:', event);
           
           // Check if the message is from the FastnWidget
           if (event.data && typeof event.data === 'object') {
-            console.log('Widget response:', event.data);
+            
+            // Check for ANY event that might indicate a modal or dialog
+            if (
+              (event.data.type && (
+                event.data.type === "MODAL_OPENED" || 
+                event.data.type === "POPUP_OPENED" || 
+                event.data.type === "DIALOG_OPENED" ||
+                event.data.type.includes("MODAL") ||
+                event.data.type.includes("POPUP") ||
+                event.data.type.includes("DIALOG") ||
+                event.data.type.includes("OPEN")
+              )) || 
+              (event.data.eventType && (
+                event.data.eventType === "modal_opened" ||
+                event.data.eventType.includes("modal") ||
+                event.data.eventType.includes("popup") ||
+                event.data.eventType.includes("dialog") ||
+                event.data.eventType.includes("open")
+              ))
+            ) {
+              
+              // Try all possible scrolling methods
+              window.scrollTo(0, 0);
+              document.body.scrollTop = 0;
+              document.documentElement.scrollTop = 0;
+              
+              // Set multiple timeouts at different intervals to catch when modal is rendered
+              for (let delay of [100, 300, 500, 1000]) {
+                setTimeout(() => {
+                  window.scrollTo({ top: 0, behavior: 'auto' });
+                  document.body.scrollTop = 0;
+                  document.documentElement.scrollTop = 0;
+                  
+                  // Try to find any scrollable containers
+                  document.querySelectorAll('.overflow-auto, .overflow-y-auto, [style*="overflow"]').forEach(el => {
+                    (el as HTMLElement).scrollTop = 0;
+                  });
+                }, delay);
+              }
+            }
             
             // Check specifically for connectors data being null or empty array
             if (event.data.type === 'CONNECTORS_DATA') {
               if (
                   event.data.data === null || 
                   (Array.isArray(event.data.data) && event.data.data.length === 0) ||
-                  (typeof event.data.data === 'object' && Object.keys(event.data.data).length === 0)
+                  (typeof event.data.data === 'object' && Object.keys(event.data.data || {}).length === 0)
                 ) {
                 console.log('Connectors data is null or empty array');
                 setConnectorsDataNull(true); // No connectors available
@@ -875,8 +1033,6 @@ Result: ${JSON.stringify(response)}`,
                 setConnectorsDataNull(false); // Connectors are available
               }
             }
-            
-            // No need to check for no_connector_found event here as we have a dedicated listener
             
             // Store widget responses with timestamp
             setWidgetResponses(prev => [
@@ -898,6 +1054,7 @@ Result: ${JSON.stringify(response)}`,
       // Clean up event listener
       return () => {
         window.removeEventListener('message', handleWidgetMessage);
+        window.removeEventListener('message', handleAllMessages);
       };
     }
   }, [sidebarView, widgetMounted, authStatus, tenantId, authToken]);
@@ -1516,7 +1673,7 @@ Result: ${JSON.stringify(response)}`,
           )} */}
           
           {/* Chat messages */}
-          <div className={`flex-1  px-4 ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+          <div className={`flex-1 px-4 ${conversation.messages.length === 0 ? '' : ''}`}>
             <div className={`bg-white rounded-lg shadow-md px-4 h-full space-y-4 relative ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
             {conversation.messages.length > 0 &&<div className='w-full py-0.5 bg-white sticky left-0 top-0  z-20 justify-between flex flex-row'>
               <div></div>
@@ -1605,7 +1762,7 @@ Result: ${JSON.stringify(response)}`,
             sidebarVisible ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
-          <div className="h-full overflow-y-auto p-4 flex flex-col">
+          <div className="h-full p-4 flex flex-col overflow-y-auto">
             {/* Toggle between Config, Tools, and Widgets */}
             <div className="flex mb-1 pb-4">
               <ToggleTabs
@@ -1667,7 +1824,7 @@ Result: ${JSON.stringify(response)}`,
             )}
 
             {/* Content based on selected view */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1">
               {sidebarView === 'tools' ? (
                 <>
                   <div className="flex justify-between items-center mb-3">
