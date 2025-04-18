@@ -144,8 +144,6 @@ api.interceptors.response.use(
 );
 
 export const getTools = async (useCase: string, spaceId: string, authToken: string, tenantId?: string): Promise<Tool[]> => {
-
-export const getTools = async (useCase: string, spaceId: string, tenantId?: string): Promise<Tool[]> => {
   if (!spaceId) {
     console.warn('Space ID is missing. Cannot fetch tools.');
     return [];
@@ -162,7 +160,6 @@ export const getTools = async (useCase: string, spaceId: string, tenantId?: stri
         'x-fastn-space-tenantid': tenantId || '',
         'x-fastn-custom-auth': 'true',
         'authorization': `Bearer ${authToken}`
-
       }
     });
     return response.data || [];
@@ -210,7 +207,7 @@ export const executeTool = async (
   availableTools: Tool[],
   authToken: string,
   tenantId?: string
-) => {
+): Promise<any> => {
 
   try {
     let tool = availableTools.find(t => t.actionId === actionId);
