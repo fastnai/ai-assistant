@@ -358,6 +358,7 @@ function App() {
       setIsToolsRefreshing(true);
       setError(null);
       // Pass apiKey and spaceId to getTools
+      const tools = await getTools('chat', spaceId, tenantId, authToken);
       const tools = await getTools('chat', spaceId, tenantId);
       console.log('Tools loaded:', tools);
       setAvailableTools(tools);
@@ -639,7 +640,8 @@ function App() {
         apiKey,             
         spaceId,            
         availableTools,
-        tenantId // Pass tenant ID to executeTool      
+        tenantId, // Pass tenant ID to executeTool  
+        authToken    
       );
 
       console.log('Tool execution response:', response);
