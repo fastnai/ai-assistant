@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { Tool } from './types';
 
 const api = axios.create({
@@ -188,7 +188,7 @@ export const getConnectors = async (spaceId: string, tenantId: string): Promise<
   }
 };
 
-export const getTools = async (useCase: string, spaceId: string, tenantId?: string, authToken: string): Promise<Tool[]> => {
+export const getTools = async (useCase: string, spaceId: string, authToken: string, tenantId?: string): Promise<Tool[]> => {
 
   try {
     const response = await api.post('/api/ucl/getTools', {
@@ -248,8 +248,8 @@ export const executeTool = async (
   apiKey: string,
   spaceId: string,
   availableTools: Tool[],
-  tenantId?: string,
-  authToken: string
+  authToken: string,
+  tenantId?: string
 ) => {
 
   try {
@@ -275,6 +275,8 @@ export const executeTool = async (
       // 'x-fastn-api-key': apiKey,
       'x-fastn-space-id': spaceId,
       'x-fastn-space-tenantid': tenantId || '',
+      'x-fastn-custom-auth': 'true',
+      'authorization': `Bearer ${authToken}`
     };
     
 
