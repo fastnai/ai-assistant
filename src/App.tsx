@@ -360,7 +360,7 @@ function App() {
       setError('Authentication required to load tools.');
       return;
     }
-    
+    console.log('Loading tools');
     // Check if token is valid, refresh if needed
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
@@ -378,7 +378,9 @@ function App() {
       setIsToolsRefreshing(true);
       setError(null);
       // Pass apiKey and spaceId to getTools
+
       const tools = await getTools('chat', spaceId, authToken, tenantId);
+
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
