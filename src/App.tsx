@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './components/ChatMessage';
-import { ChatInput } from './components/ChatInput';
+import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
-import { getTools, executeTool } from './api';
+import { getTools, executeTool, getConnectors } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut } from 'lucide-react';
+import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut, Bot } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
 import AuthBox from './components/AuthBox';
+import { Tooltip } from "react-tooltip";
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -36,13 +37,25 @@ function App() {
   const [username, setUsername] = useState<string>(() => localStorage.getItem('fastnUsername') || '');
   const [password, setPassword] = useState<string>(() => localStorage.getItem('fastnPassword') || '');
   const [authToken, setAuthToken] = useState<string>(() => localStorage.getItem('fastnAuthToken') || '');
+  const [refreshToken, setRefreshToken] = useState<string>(() => localStorage.getItem('fastnRefreshToken') || '');
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(() => 
     (localStorage.getItem('fastnAuthStatus') as 'idle' | 'loading' | 'success' | 'error') || 'idle'
   );
   const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
+  const [tokenExpiryTime, setTokenExpiryTime] = useState<number>(() => {
+    const saved = localStorage.getItem('fastnTokenExpiryTime');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [refreshTokenExpiryTime, setRefreshTokenExpiryTime] = useState<number>(() => {
+    const saved = localStorage.getItem('fastnRefreshTokenExpiryTime');
+    return saved ? parseInt(saved) : 0;
+  });
 
-  const [sidebarView, setSidebarView] = useState<'tools' | 'widgets' | 'config'>('config');
+  const [sidebarView, setSidebarView] = useState<'tools' | 'apps' | 'config'>('config');
   const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
+  const [widgetResponses, setWidgetResponses] = useState<any[]>([]);
+  const [connectorsDataNull, setConnectorsDataNull] = useState<boolean>(false);
+  const widgetIframeRef = useRef<HTMLIFrameElement | null>(null);
   const auth = useAuth();
   // Available models that support tool calls
   const modelsWithToolCalls = [
@@ -112,17 +125,110 @@ function App() {
   }, [authToken]);
   
   useEffect(() => {
+    localStorage.setItem('fastnRefreshToken', refreshToken);
+  }, [refreshToken]);
+  
+  useEffect(() => {
     localStorage.setItem('fastnAuthStatus', authStatus);
   }, [authStatus]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnTokenExpiryTime', tokenExpiryTime.toString());
+  }, [tokenExpiryTime]);
+
+  useEffect(() => {
+    localStorage.setItem('fastnRefreshTokenExpiryTime', refreshTokenExpiryTime.toString());
+  }, [refreshTokenExpiryTime]);
+
+  // Add ref for ChatInput
+  const chatInputRef = useRef<ChatInputHandles>(null);
 
   // Function to handle logout
   const handleLogout = () => {
     // Clear authentication data
     setAuthToken('');
+    setRefreshToken('');
     setAuthStatus('idle');
+    setTokenExpiryTime(0);
+    setRefreshTokenExpiryTime(0);
+    // Clear user credentials
+    setUsername('');
+    setPassword('');
+    setTenantId('');
+    setSpaceId('');
+    // Clear localStorage data
+    localStorage.removeItem('fastnAuthToken');
+    localStorage.removeItem('fastnRefreshToken');
+    localStorage.removeItem('fastnAuthStatus');
+    localStorage.removeItem('fastnTokenExpiryTime');
+    localStorage.removeItem('fastnRefreshTokenExpiryTime');
+    localStorage.removeItem('conversation');
+    localStorage.removeItem('fastnUsername');
+    localStorage.removeItem('fastnPassword');
+    localStorage.removeItem('fastnTenantId');
+    localStorage.removeItem('fastnSpaceId');
+    localStorage.setItem('fastnAuthStatus', 'idle');
+    setToolResults({});
+    // Clear the input field
+    chatInputRef.current?.resetMessage();
     // Expand the auth box
     setAuthBoxExpanded(true);
+    // Clear tools and apps data
+    setAvailableTools([]);
+    setWidgetMounted(false);
+    setWidgetKey(prevKey => prevKey + 1);
+    setWidgetResponses([]);
+    setConnectorsDataNull(true);
+    // Switch to config view
+    setSidebarView('config');
+    // Clear conversation
+    setConversation({ messages: [] });
     console.log('User logged out');
+  };
+
+  // Function to handle Space ID change
+  const handleSpaceIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newSpaceId = e.target.value;
+    setSpaceId(newSpaceId);
+    
+    // Clear tools and related data when Space ID changes
+    setAvailableTools([]);
+    setConversation({ messages: [] });
+    setToolResults({});
+    
+    // Automatically load tools if authenticated and space ID is provided
+    if (authStatus === 'success' && authToken && newSpaceId.trim()) {
+      // Use setTimeout to allow state update to complete first
+      setTimeout(() => {
+        loadTools();
+        // Also load widgets if tenant ID is available
+        if (tenantId?.trim()) {
+          loadWidgets();
+          // Navigate to apps tab if both Space ID and Tenant ID are provided
+          setSidebarView('apps');
+        }
+      }, 100);
+    }
+  };
+
+  // Function to handle Tenant ID change
+  const handleTenantIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTenantId = e.target.value;
+    setTenantId(newTenantId);
+    
+    // Reset widget data when Tenant ID changes
+    setWidgetMounted(false);
+    setWidgetKey(prevKey => prevKey + 1);
+    
+    // Automatically load widgets if authenticated and both tenant ID and space ID are provided
+    if (authStatus === 'success' && authToken && newTenantId.trim() && spaceId?.trim()) {
+      // Use setTimeout to allow state update to complete first
+      setTimeout(() => {
+        loadWidgets();
+        // Navigate to apps tab when both IDs are provided
+        setSidebarView('apps');
+      }, 100);
+    }
   };
 
   // Function to fetch auth token when username and password are available
@@ -172,13 +278,23 @@ function App() {
       
       // Extract the access_token directly from the response
       const accessToken = data.access_token;
+      const refreshTokenValue = data.refresh_token;
+      const expiresIn = data.expires_in;
+      const refreshExpiresIn = data.refresh_expires_in;
+      
       console.log('Using access token:', accessToken);
       
       if (!accessToken) {
         throw new Error('No access token received from authentication server');
       }
       
+      // Calculate and set token expiry times
+      const now = Date.now();
+      setTokenExpiryTime(now + (parseInt(expiresIn) * 60 * 1000)); // Convert minutes to milliseconds
+      setRefreshTokenExpiryTime(now + (parseInt(refreshExpiresIn) * 60 * 1000)); // Convert minutes to milliseconds
+      
       setAuthToken(accessToken);
+      setRefreshToken(refreshTokenValue);
       setAuthStatus('success');
       
       // Close the auth box on successful login
@@ -190,8 +306,9 @@ function App() {
       console.error('Error fetching auth token:', error);
       // Clear the token and status if authentication fails
       setAuthToken('');
+      setRefreshToken('');
       setAuthStatus('error');
-      setAuthErrorMessage(error instanceof Error ? error.message : 'Authentication failed');
+      setAuthErrorMessage('Authentication failed');
     }
   };
 
@@ -214,63 +331,100 @@ function App() {
     }
   }, [authStatus, sidebarView]);
 
+  const [isToolsRefreshing, setIsToolsRefreshing] = useState(false);
+  const [isAppsRefreshing, setIsAppsRefreshing] = useState(false);
+
   const loadTools = async () => {
-    if (!apiKey || !spaceId) {
-      setError('API Key and Space ID are required to load tools.');
-      setAvailableTools([]); // Clear tools if credentials missing
-      return;
-    }
-    
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
       setError('Authentication required to load tools.');
       return;
     }
     
+    // Check if token is valid, refresh if needed
+    const isTokenValid = await ensureValidToken();
+    if (!isTokenValid) {
+      setError('Authentication failed. Please log in again.');
+      return;
+    }
+    
+    // Check if Space ID is provided
+    if (!spaceId?.trim()) {
+      setError('Space ID is required to load tools.');
+      return;
+    }
+    
     try {
-      setIsRefreshing(true);
+      setIsToolsRefreshing(true);
       setError(null);
       // Pass apiKey and spaceId to getTools
-      const tools = await getTools('chat', apiKey, spaceId);
+      const tools = await getTools('chat', apiKey, spaceId, tenantId);
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
       handleApiError(error);
       setError('Failed to load tools. Please try refreshing.');
+      setAvailableTools([]); // Clear tools on error
     } finally {
-      setIsRefreshing(false);
+      setIsToolsRefreshing(false);
     }
   };
 
   const loadWidgets = async () => {
-    if (!apiKey || !spaceId || !tenantId) {
-      setError('API Key, Space ID, and Tenant ID are required to load widgets.');
+    if (!tenantId) {
+      setError('Tenant ID is required to load Apps.');
+      return;
+    }
+    
+    // Check if Space ID is provided
+    if (!spaceId?.trim()) {
+      setError('Space ID is required to load Apps.');
       return;
     }
     
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to load widgets.');
+      setError('Authentication required to load Apps.');
+      return;
+    }
+    
+    // Check if token is valid, refresh if needed
+    const isTokenValid = await ensureValidToken();
+    if (!isTokenValid) {
+      setError('Authentication failed. Please log in again.');
       return;
     }
     
     try {
-      setIsRefreshing(true);
+      setIsAppsRefreshing(true);
       setError(null);
-      // Validate the authentication token
-      await validateAuthToken();
+      // Reset connectors data status when reloading
+      setConnectorsDataNull(false);
+      
+      // Check if connectors are available using the new API function
+      const hasConnectors = await getConnectors(spaceId, tenantId);
+      
+      if (!hasConnectors) {
+        // If no connectors are available, update state without mounting widget
+        setConnectorsDataNull(true);
+        console.log('No apps available - setting connectorsDataNull to true');
+        setIsAppsRefreshing(false);
+        return;
+      }
+      
       // Force remount of the FastnWidget component
       setWidgetMounted(false);
       setTimeout(() => {
         setWidgetKey(prevKey => prevKey + 1);
         setWidgetMounted(true);
-      }, 100);
+      }, 3000); // Check after 3 seconds
+      
     } catch (error) {
-      console.error('Error loading widgets:', error);
+      console.error('Error loading apps:', error);
       handleApiError(error);
-      setError('Failed to load widgets. Please try refreshing.');
+      setError('Failed to load apps. Please try refreshing.');
     } finally {
-      setIsRefreshing(false);
+      setIsAppsRefreshing(false);
     }
   };
 
@@ -309,15 +463,17 @@ function App() {
   };
 
   const handleSendMessage = async (message: string) => {
-    if (!apiKey || !spaceId) {
-      setError('API Key and Space ID are required before sending messages.');
+    // Verify we have a valid authentication token
+    if (authStatus !== 'success' || !authToken) {
+      setError('Authentication required to send messages.');
       setIsLoading(false);
       return;
     }
     
-    // Verify we have a valid authentication token
-    if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to send messages.');
+    // Check if token is valid, refresh if needed
+    const isTokenValid = await ensureValidToken();
+    if (!isTokenValid) {
+      setError('Authentication failed. Please log in again.');
       setIsLoading(false);
       return;
     }
@@ -392,7 +548,8 @@ function App() {
           setIsLoading(false);
           setStreamingText('');
         },
-        selectedModel
+        selectedModel,
+        spaceId
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -422,15 +579,17 @@ function App() {
   };
 
   const handleExecuteTool = async (actionData: any) => {
-    if (!apiKey || !spaceId) {
-        setError('API Key and Space ID are required to execute tools.');
-        setIsLoading(false);
-        return;
-    }
-    
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
       setError('Authentication required to execute tools.');
+      setIsLoading(false);
+      return;
+    }
+    
+    // Check if token is valid, refresh if needed
+    const isTokenValid = await ensureValidToken();
+    if (!isTokenValid) {
+      setError('Authentication failed. Please log in again.');
       setIsLoading(false);
       return;
     }
@@ -561,7 +720,8 @@ Result: ${JSON.stringify(response)}`,
           setIsLoading(false);
           setStreamingText('');
         },
-        selectedModel
+        selectedModel,
+        spaceId
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -618,34 +778,39 @@ Result: ${JSON.stringify(response)}`,
 
   // Function to validate the current auth token
   const validateAuthToken = async () => {
-    if (!authToken || authStatus !== 'success') {
-      return false;
-    }
-    
-    try {
-      // A simple API call that requires authentication to verify token validity
-      // This could be replaced with a specific token validation endpoint if available
-      const tools = await getTools('chat', apiKey, spaceId);
-      // If we get a successful response, the token is still valid
-      return true;
-    } catch (error) {
-      console.error('Token validation failed:', error);
-      // Clear the invalid token
-      setAuthToken('');
-      setAuthStatus('error');
-      return false;
-    }
+    return await ensureValidToken();
   };
   
   // Handle API errors related to authentication
   const handleApiError = (error: any) => {
+    // Extract status code if it's an axios error with response
+    const status = error.response?.status || error.status;
+    const message = error.message || '';
+    
     // Check if the error is an authentication error
-    if (error.status === 401 || error.message?.includes('auth') || error.message?.includes('token')) {
+    const isAuthError = status === 401 || 
+                        message.includes('auth') || 
+                        message.includes('token') ||
+                        message.includes('unauthorized') ||
+                        message.includes('unauthenticated');
+    
+    if (isAuthError) {
       console.error('Authentication error detected:', error);
-      // Clear the token and status
-      setAuthToken('');
-      setAuthStatus('error');
-      setError('Your session has expired. Please log in again.');
+      
+      // Attempt to refresh the token
+      refreshAccessToken()
+        .then(success => {
+          console.log(`Token refresh ${success ? 'succeeded' : 'failed'} after API error`);
+          if (!success) {
+            // If refresh fails, logout the user
+            console.error('Token refresh failed, logging out user');
+            handleLogout();
+          }
+        })
+        .catch(refreshError => {
+          console.error('Error during token refresh after API error:', refreshError);
+          handleLogout();
+        });
     }
     return error;
   };
@@ -658,55 +823,634 @@ Result: ${JSON.stringify(response)}`,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Add state for password and API key visibility
+  // Add state for password
   const [showPassword, setShowPassword] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
 
   // Effect to initialize widget when first visiting widgets tab
   useEffect(() => {
-    if (sidebarView === 'widgets' && !widgetMounted && authStatus === 'success' && apiKey && spaceId && tenantId && authToken) {
+    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
       setWidgetMounted(true);
+      
+      // Set up window message listener to capture widget responses
+      const handleWidgetMessage = (event: MessageEvent) => {
+        try {
+          // Log all messages from potential widget origin
+          console.log('Received window message:', event);
+          
+          // Check if the message is from the FastnWidget
+          if (event.data && typeof event.data === 'object') {
+            console.log('Widget response:', event.data);
+            
+            // Check specifically for connectors data being null or empty array
+            if (event.data.type === 'CONNECTORS_DATA' && (
+                event.data.data === null || 
+                (Array.isArray(event.data.data) && event.data.data.length === 0) ||
+                (typeof event.data.data === 'object' && Object.keys(event.data.data).length === 0)
+              )) {
+              console.log('Connectors data is null or empty array');
+              setConnectorsDataNull(true);
+            }
+            
+            // Store widget responses with timestamp
+            setWidgetResponses(prev => [
+              ...prev, 
+              { 
+                timestamp: new Date().toISOString(),
+                data: event.data 
+              }
+            ]);
+          }
+        } catch (error) {
+          console.error('Error processing widget message:', error);
+        }
+      };
+      
+      // Add event listener
+      window.addEventListener('message', handleWidgetMessage);
+      
+      // Clean up event listener
+      return () => {
+        window.removeEventListener('message', handleWidgetMessage);
+      };
     }
-  }, [sidebarView, widgetMounted, authStatus, apiKey, spaceId, tenantId, authToken]);
+  }, [sidebarView, widgetMounted, authStatus, tenantId, authToken]);
+
+  // Function to refresh access token using refresh token
+  const refreshAccessToken = async () => {
+    if (!refreshToken) {
+      console.log('No refresh token available');
+      handleLogout();
+      return false;
+    }
+
+    // Check if refresh token is expired
+    if (refreshTokenExpiryTime > 0 && Date.now() > refreshTokenExpiryTime) {
+      console.log('Refresh token expired');
+      handleLogout();
+      return false;
+    }
+
+    try {
+      console.log('Refreshing access token...');
+      
+      // Updated to use same endpoint and format as initial token fetch
+      const response = await fetch('https://live.fastn.ai/api/v1/generateFastnAccessToken', {
+        method: 'POST',
+        headers: {
+          'x-fastn-api-key': "21112588-769a-4311-a359-cf094bee5382",
+          'Content-Type': 'application/json',
+          'x-fastn-space-id': "43aea445-7772-4e45-b1e8-548b96c4bf2b",
+          'x-fastn-space-tenantid': '',
+          'stage': 'LIVE'
+        },
+        body: JSON.stringify({ 
+          input: {
+            refresh_token: refreshToken
+          } 
+        })
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to refresh token: ${response.status} ${response.statusText}`);
+        // Try to get the error details from the response
+        try {
+          const errorData = await response.json();
+          console.error('Token refresh error details:', errorData);
+        } catch (parseError) {
+          console.error('Could not parse error response');
+        }
+        
+        // If status is 401, the refresh token itself is invalid
+        if (response.status === 401) {
+          console.error('Refresh token is invalid, logging out');
+          handleLogout();
+          return false;
+        }
+        
+        // For other errors, we might want to retry or handle differently
+        if (response.status >= 500) {
+          console.error('Server error during token refresh, might retry later');
+        } else {
+          handleLogout();
+        }
+        return false;
+      }
+
+      const data = await response.json();
+      console.log('Token refresh response received');
+      
+      if (!data.access_token) {
+        console.error('No access token in refresh response');
+        handleLogout();
+        return false;
+      }
+      
+      // Update tokens and expiry times
+      setAuthToken(data.access_token);
+      setRefreshToken(data.refresh_token || refreshToken); // Keep old refresh token if not provided
+      
+      // Calculate and set token expiry times
+      const now = Date.now();
+      const expiresIn = data.expires_in || 60; // Default to 60 minutes if not provided
+      const refreshExpiresIn = data.refresh_expires_in || 1440; // Default to 1 day if not provided
+      
+      const newTokenExpiryTime = now + (parseInt(expiresIn) * 60 * 1000);
+      const newRefreshTokenExpiryTime = now + (parseInt(refreshExpiresIn) * 60 * 1000);
+      
+      console.log(`New token expires in ${expiresIn} minutes`);
+      setTokenExpiryTime(newTokenExpiryTime);
+      setRefreshTokenExpiryTime(newRefreshTokenExpiryTime);
+      
+      console.log('Access token refreshed successfully');
+      return true;
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      // Don't immediately logout on network errors - might be temporary
+      if (error instanceof TypeError && error.message.includes('network')) {
+        console.log('Network error during token refresh, will try again later');
+        return false;
+      } else {
+        handleLogout();
+        return false;
+      }
+    }
+  };
+
+  // Function to check token validity and refresh if needed
+  const ensureValidToken = async () => {
+    // If not authenticated, don't do anything
+    if (authStatus !== 'success' || !authToken) {
+      return false;
+    }
+    
+    // If token is valid, return true
+    if (tokenExpiryTime > 0 && Date.now() < tokenExpiryTime) {
+      return true;
+    }
+    
+    // Token is expired, try to refresh
+    return await refreshAccessToken();
+  };
+
+  // Check token validity periodically
+  useEffect(() => {
+    if (authStatus === 'success' && authToken) {
+      console.log('Setting up token refresh interval check');
+      const interval = setInterval(async () => {
+        // Check if access token is about to expire (within 30 seconds)
+        if (tokenExpiryTime > 0 && Date.now() > tokenExpiryTime - 30000) {
+          console.log('Token is about to expire, refreshing...');
+          await refreshAccessToken();
+        } else {
+          // Force token validation every minute regardless of expiry time
+          const currentTime = Date.now();
+          const tokenAge = tokenExpiryTime - currentTime;
+          console.log(`Token health check: ${Math.floor(tokenAge / 1000)}s until expiry`);
+          
+          // If token is older than 4 minutes, refresh it proactively
+          if (tokenAge < 60000) {
+            console.log('Proactively refreshing token');
+            await refreshAccessToken();
+          }
+        }
+      }, 10000); // Check every 10 seconds
+      
+      return () => {
+        console.log('Clearing token refresh interval');
+        clearInterval(interval);
+      };
+    }
+  }, [authStatus, authToken, tokenExpiryTime, refreshToken]); // Add refreshToken to dependencies
+
+  // Effect to check connector availability when tenantId or spaceId changes
+  useEffect(() => {
+    const checkConnectorAvailability = async () => {
+      if (tenantId && spaceId && authStatus === 'success' && authToken) {
+        try {
+          console.log('Checking connector availability...');
+          const hasConnectors = await getConnectors(spaceId, tenantId);
+          setConnectorsDataNull(!hasConnectors);
+          
+          if (!hasConnectors) {
+            console.log('No apps available - detected in initial connectors check');
+          } else {
+            console.log('Apps are available - found connectors in initial check');
+          }
+        } catch (error) {
+          console.error('Error checking connector availability:', error);
+        }
+      }
+    };
+    
+    checkConnectorAvailability();
+  }, [tenantId, spaceId, authStatus, authToken]);
+
+  // Function to inspect widget iframe content
+  const inspectWidgetContent = () => {
+    try {
+      // Try to find the iframe element that FastnWidget likely uses
+      const iframes = document.querySelectorAll('iframe');
+      console.log('Found iframes:', iframes);
+      
+      // Find iframe related to the widget (usually has fastn in the src)
+      const widgetIframe = Array.from(iframes).find(iframe => 
+        iframe.src && iframe.src.includes('fastn')
+      );
+      
+      if (widgetIframe) {
+        console.log('Widget iframe found:', widgetIframe);
+        
+        try {
+          // Try to access the iframe's document (may throw security error due to same-origin policy)
+          const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
+          console.log('Widget iframe document:', iframeDocument);
+          
+          // Store response to show in UI
+          setWidgetResponses(prev => [
+            ...prev, 
+            { 
+              timestamp: new Date().toISOString(),
+              data: { 
+                type: 'iframe_inspection',
+                success: true,
+                message: 'Iframe content inspected. See console for details.'
+              } 
+            }
+          ]);
+        } catch (securityError) {
+          console.error('Security error accessing iframe content:', securityError);
+          setWidgetResponses(prev => [
+            ...prev, 
+            { 
+              timestamp: new Date().toISOString(),
+              data: { 
+                type: 'iframe_inspection_error',
+                success: false,
+                message: 'Security error accessing iframe content. Widget likely uses a different origin.'
+              } 
+            }
+          ]);
+        }
+      } else {
+        console.log('Widget iframe not found');
+        setWidgetResponses(prev => [
+          ...prev, 
+          { 
+            timestamp: new Date().toISOString(),
+            data: { 
+              type: 'iframe_not_found',
+              success: false,
+              message: 'Could not find FastnWidget iframe'
+            } 
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('Error inspecting widget content:', error);
+      setWidgetResponses(prev => [
+        ...prev, 
+        { 
+          timestamp: new Date().toISOString(),
+          data: { 
+            type: 'inspection_error',
+            success: false,
+            error: String(error)
+          } 
+        }
+      ]);
+    }
+  };
+
+  // Function to monitor widget iframe console outputs
+  const monitorWidgetConsole = () => {
+    try {
+      // Try to find the iframe element that FastnWidget likely uses
+      const iframes = document.querySelectorAll('iframe');
+      const widgetIframe = Array.from(iframes).find(iframe => 
+        iframe.src && iframe.src.includes('fastn')
+      );
+      
+      if (widgetIframe && widgetIframe.contentWindow) {
+        console.log('Attempting to monitor widget console output');
+        
+        try {
+          // Try to inject script to override console methods
+          // Note: This might not work due to security restrictions
+          const script = document.createElement('script');
+          script.textContent = `
+            // Store original console methods
+            const originalConsole = {
+              log: console.log,
+              error: console.error,
+              warn: console.warn,
+              info: console.info
+            };
+            
+            // Override console methods to send messages to parent
+            console.log = function() {
+              // Call original method
+              originalConsole.log.apply(console, arguments);
+              // Send to parent
+              window.parent.postMessage({
+                type: 'widget_console',
+                method: 'log',
+                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+              }, '*');
+            };
+            
+            console.error = function() {
+              originalConsole.error.apply(console, arguments);
+              window.parent.postMessage({
+                type: 'widget_console',
+                method: 'error',
+                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+              }, '*');
+            };
+            
+            console.warn = function() {
+              originalConsole.warn.apply(console, arguments);
+              window.parent.postMessage({
+                type: 'widget_console',
+                method: 'warn',
+                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+              }, '*');
+            };
+            
+            console.info = function() {
+              originalConsole.info.apply(console, arguments);
+              window.parent.postMessage({
+                type: 'widget_console',
+                method: 'info',
+                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+              }, '*');
+            };
+            
+            window.parent.postMessage({
+              type: 'widget_console',
+              method: 'info',
+              args: ['Console monitoring initialized']
+            }, '*');
+          `;
+          
+          try {
+            widgetIframe.contentDocument?.head.appendChild(script);
+            setWidgetResponses(prev => [
+              ...prev, 
+              { 
+                timestamp: new Date().toISOString(),
+                data: { 
+                  type: 'console_monitor_setup',
+                  success: true,
+                  message: 'Console monitoring script injected. Widget console outputs will appear here.'
+                } 
+              }
+            ]);
+          } catch (injectError) {
+            console.error('Error injecting console monitor script:', injectError);
+            setWidgetResponses(prev => [
+              ...prev, 
+              { 
+                timestamp: new Date().toISOString(),
+                data: { 
+                  type: 'console_monitor_error',
+                  success: false,
+                  message: 'Could not inject console monitoring script due to security restrictions.',
+                  error: String(injectError)
+                } 
+              }
+            ]);
+          }
+        } catch (securityError) {
+          console.error('Security error accessing iframe for console monitoring:', securityError);
+          setWidgetResponses(prev => [
+            ...prev, 
+            { 
+              timestamp: new Date().toISOString(),
+              data: { 
+                type: 'console_monitor_security_error',
+                success: false,
+                message: 'Security error accessing iframe for console monitoring.',
+                error: String(securityError)
+              } 
+            }
+          ]);
+        }
+      } else {
+        console.log('Widget iframe not found for console monitoring');
+        setWidgetResponses(prev => [
+          ...prev, 
+          { 
+            timestamp: new Date().toISOString(),
+            data: { 
+              type: 'iframe_not_found',
+              success: false,
+              message: 'Could not find FastnWidget iframe for console monitoring'
+            } 
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('Error setting up console monitoring:', error);
+      setWidgetResponses(prev => [
+        ...prev, 
+        { 
+          timestamp: new Date().toISOString(),
+          data: { 
+            type: 'console_monitor_setup_error',
+            success: false,
+            error: String(error)
+          } 
+        }
+      ]);
+    }
+  };
+
+  // Function to trigger widget API communication
+  const testWidgetAPI = () => {
+    try {
+      // Record that we're triggering the test
+      setWidgetResponses(prev => [
+        ...prev, 
+        { 
+          timestamp: new Date().toISOString(),
+          data: { 
+            type: 'api_test_trigger',
+            message: 'Attempting to trigger widget API communication. Check console for messages.'
+          } 
+        }
+      ]);
+      
+      // Try to find the iframe element that FastnWidget likely uses
+      const iframes = document.querySelectorAll('iframe');
+      const widgetIframe = Array.from(iframes).find(iframe => 
+        iframe.src && iframe.src.includes('fastn')
+      );
+      
+      if (widgetIframe && widgetIframe.contentWindow) {
+        console.log('Found widget iframe for API test:', widgetIframe);
+        
+        // Send a message to the widget iframe to trigger API communication
+        widgetIframe.contentWindow.postMessage({
+          type: 'widget_api_test',
+          command: 'fetch_data',
+          timestamp: Date.now()
+        }, '*');
+        
+        // Try to access iframe content to trigger more actions
+        try {
+          // This may fail due to cross-origin restrictions
+          const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
+          
+          if (iframeDocument) {
+            // Try to find buttons or links that might trigger API calls
+            const buttons = iframeDocument.querySelectorAll('button');
+            const links = iframeDocument.querySelectorAll('a');
+            
+            console.log('Found widget buttons:', buttons);
+            console.log('Found widget links:', links);
+            
+            // Try to click the first button to trigger action
+            if (buttons.length > 0) {
+              console.log('Attempting to click first button');
+              buttons[0].click();
+            }
+            
+            // Try to trigger iframe reload which might cause API calls
+            widgetIframe.contentWindow.location.reload();
+          }
+        } catch (securityError) {
+          console.error('Security error accessing iframe content for API test:', securityError);
+        }
+      } else {
+        console.log('Widget iframe not found for API test');
+        setWidgetResponses(prev => [
+          ...prev, 
+          { 
+            timestamp: new Date().toISOString(),
+            data: { 
+              type: 'iframe_not_found',
+              success: false,
+              message: 'Could not find FastnWidget iframe for API test'
+            } 
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('Error during widget API test:', error);
+      setWidgetResponses(prev => [
+        ...prev, 
+        { 
+          timestamp: new Date().toISOString(),
+          data: { 
+            type: 'api_test_error',
+            success: false,
+            error: String(error)
+          } 
+        }
+      ]);
+    }
+  };
+
+  // Function to simulate null connectors data
+  const simulateNullConnectors = () => {
+    setConnectorsDataNull(true);
+    setWidgetResponses(prev => [
+      ...prev, 
+      { 
+        timestamp: new Date().toISOString(),
+        data: { 
+          type: 'SIMULATED_NULL_CONNECTORS',
+          message: 'Simulated null connectors data. Widget display should update to show "No apps available".'
+        } 
+      }
+    ]);
+  };
+
+  // Effect to check for empty connectors data when viewing the apps tab
+  useEffect(() => {
+    if (sidebarView === 'apps' && authStatus === 'success' && widgetResponses.length > 0) {
+      // Check if we have any responses with empty connectors data
+      const hasEmptyConnectors = widgetResponses.some(response => 
+        response.data?.type === 'CONNECTORS_DATA' && 
+        (!response.data.data || 
+         (Array.isArray(response.data.data) && response.data.data.length === 0) ||
+         (typeof response.data.data === 'object' && Object.keys(response.data.data || {}).length === 0))
+      );
+      
+      if (hasEmptyConnectors) {
+        console.log('Empty connectors data detected in responses');
+        setConnectorsDataNull(true);
+      }
+    }
+  }, [sidebarView, authStatus, widgetResponses]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden justify-center">
         {/* Chat area */}
-        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300`}>
+        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? 'py-[130px]' : 'h-full'}`}>
           {/* Header */}
           <div className="flex flex-col items-center pt-6 pb-4">
-            <img 
-              src="https://www.shutterstock.com/image-vector/chat-bot-icon-virtual-smart-600nw-2478937553.jpg"
-              alt="AI Agent" 
-              className="w-16 h-16 rounded-full mb-3 shadow-md" 
+            <Bot 
+              className="w-16 h-16 rounded-full mb-3 shadow-md p-3 bg-gradient-to-tr from-[#b857ce] via-[#d04fad] to-[#f9a254] text-white" 
             />
             <h1 className="text-2xl font-bold text-gray-800 mb-2">AI Assistant</h1>
-            <button
-              onClick={clearConversation}
-              className="flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear Chat
-            </button>
+           
           </div>
           
           {/* Error message */}
-          {error && (
+          {/* {error && (
             <div className="mx-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
               {error}
             </div>
-          )}
+          )} */}
           
           {/* Chat messages */}
-          <div className="flex-1 overflow-y-auto px-4 pb-4">
-            <div className="bg-white rounded-lg shadow-md p-4 h-full overflow-y-auto space-y-4">
-              {conversation.messages.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-gray-500">
-                  <p>Send a message to start the conversation</p>
+          <div className={`flex-1  px-4 ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+            <div className={`bg-white rounded-lg shadow-md px-4 h-full space-y-4 relative ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+            {conversation.messages.length > 0 &&<div className='w-full py-0.5 bg-white sticky left-0 top-0  z-20 justify-between flex flex-row'>
+              <div></div>
+              <button
+                onClick={clearConversation}
+                className="p-2 text-red-500 hover:text-red-500 hover:bg-gray-100 rounded-full transition-colors"
+                title="Clear chat"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>}
+              {(authStatus !== 'success'  || connectorsDataNull || availableTools.length === 0 )? (
+                <div className="flex flex-col h-full items-center justify-center text-gray-600 text-[17px]">
+                  
+                    <div className="max-w-sm">
+                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${authStatus === 'success' ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {authStatus === 'success' && <span className="text-white">✓</span>}
+                        </div>
+                        Create an account
+                      </p>
+                      <p className="font-[600] mb-2 flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${!connectorsDataNull ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {!connectorsDataNull && <span className="text-white">✓</span>}
+                        </div>
+                        Activate connectors (via MCP)
+                      </p>
+                      <p className="font-[600] flex items-center text-indigo-700">
+                        <div className={`w-5 h-5 border ${availableTools.length > 0 ? 'bg-indigo-600 border-indigo-700' : 'border-indigo-300'} rounded mr-2 flex items-center justify-center`}>
+                          {availableTools.length > 0 && <span className="text-white">✓</span>}
+                        </div>
+                        Select your tools
+                      </p>
+                    </div>
+                  
+                    
+                
                 </div>
-              ) : (
+              ) :(authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0)? (
+              <div className="flex flex-col h-full items-center justify-center text-indigo-700 text-[17px]">
+              <div className="max-w-sm">
+                      <p>Send a message to start the conversation</p>
+                    </div></div>): (
                 conversation.messages.map((message) => (
                   <ChatMessage 
                     key={message.id} 
@@ -723,14 +1467,31 @@ Result: ${JSON.stringify(response)}`,
           
           {/* Chat input */}
           <div className="p-4">
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
+            <div className={`bg-white rounded-lg shadow-md px-2 py-2 ${(authStatus !== 'success' || availableTools.length === 0) ? 'bg-opacity-75' : ''}`}>
+              <ChatInput 
+                ref={chatInputRef}
+                onSendMessage={handleSendMessage} 
+                disabled={isLoading || authStatus !== 'success' || availableTools.length === 0} 
+                className={authStatus !== 'success' || availableTools.length === 0 ? 'opacity-50' : ''}
+                authStatus={authStatus}
+                
+              />
               {isLoading && !streamingText && (
                 <div className="text-center mt-2 text-sm text-gray-500">
-                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-blue-500 border-r-transparent align-[-0.125em] mr-2"></div>
+                  <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-[#5B5EF0] border-r-transparent align-[-0.125em] mr-2"></div>
                   Processing your request...
                 </div>
               )}
+              {/* {authStatus !== 'success' && (
+                <div className="text-center mt-2 text-sm text-amber-600">
+                  Please log in to send messages
+                </div>
+              )}
+              {authStatus === 'success' && availableTools.length === 0 && (
+                <div className="text-center mt-2 text-sm text-amber-600">
+                  No tools available - unable to process messages
+                </div>
+              )} */}
             </div>
           </div>
         </div>
@@ -738,16 +1499,15 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-blue-500 text-white p-2 rounded-l-lg shadow-md hover:bg-blue-600 z-10"
+          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-[#e8eaff] text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
           style={{ right: sidebarVisible ? '500px' : '0' }}
-          title={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
         >
           {sidebarVisible ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
 
         {/* Tools Sidebar */}
         <div 
-          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg ${
+          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg z-20 ${
             sidebarVisible ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
@@ -758,7 +1518,17 @@ Result: ${JSON.stringify(response)}`,
                 selectedTab={sidebarView}
                 setSelectedTab={(id) => {
                   if (authStatus === 'success' || id === 'config') {
-                    setSidebarView(id as 'tools' | 'widgets' | 'config');
+                    setSidebarView(id as 'tools' | 'apps' | 'config');
+                    
+                    // Call loadTools when switching to tools tab
+                    if (id === 'tools' && authStatus === 'success') {
+                      loadTools();
+                    }
+                    
+                    // Call loadWidgets when switching to apps tab
+                    if (id === 'apps' && authStatus === 'success') {
+                      loadWidgets();
+                    }
                   }
                 }}
                 tabs={[
@@ -767,17 +1537,29 @@ Result: ${JSON.stringify(response)}`,
                     name: 'Config',
                     icon: <KeyRound className="w-4 h-4" />
                   },
+                  
                   {
+                    id: 'apps',
+                    name: 'Apps',
+                    icon: <LayoutGrid className="w-4 h-4" />,
+                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success' 
+                      ? "Please log in to access Apps" 
+                      : !tenantId?.trim() 
+                        ? "Tenant ID is required to access Apps" 
+                        : !spaceId?.trim() 
+                          ? "Space ID is required to access Apps" 
+                          : ""
+                  },{
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success'
-                  },
-                  {
-                    id: 'widgets',
-                    name: 'Widgets',
-                    icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success'
+                    disabled: authStatus !== 'success' || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success'
+                      ? "Please log in to access Tools"
+                      : !spaceId?.trim()
+                        ? "Space ID is required to access Tools"
+                        : ""
                   }
                 ]}
                 className="w-full"
@@ -788,7 +1570,7 @@ Result: ${JSON.stringify(response)}`,
             {authStatus !== 'success' && (
               <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
                 <div className="mr-2 flex-shrink-0">⚠️</div>
-                <div>Please log in to access Tools and Connector Widgets</div>
+                <div>Please log in to access Tools and Apps</div>
               </div>
             )}
 
@@ -800,19 +1582,15 @@ Result: ${JSON.stringify(response)}`,
                     <h2 className="text-xl font-bold">Available Tools</h2>
                     <button
                       onClick={loadTools}
-                      disabled={isRefreshing || !apiKey || !spaceId}
-                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!apiKey || !spaceId ? "Enter Credentials to Load Tools" : "Refresh Tools"}
+                      disabled={isToolsRefreshing}
+                      className="p-2 rounded-full hover:bg-gray-100"
+                      title="Refresh Tools"
                     >
-                      <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-5 h-5 ${isToolsRefreshing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                   
-                  {(!apiKey || !spaceId) ? (
-                    <div className="flex items-center justify-center h-20">
-                      <p className="text-gray-500 text-center text-sm px-4">Enter API Key and Space ID above to load tools.</p>
-                    </div>
-                  ) : availableTools.length > 0 ? (
+                  {availableTools.length > 0 ? (
                     <div className="space-y-3">
                       {availableTools.map((tool: Tool, index: number) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
@@ -831,50 +1609,151 @@ Result: ${JSON.stringify(response)}`,
                       ))}
                     </div>
                   ) : (
-                    <div className="flex items-center justify-center h-20">
-                      <p className="text-gray-500 text-sm">
-                        {isRefreshing ? 'Loading tools...' : 'No tools available or failed to load.'}
-                      </p>
-                    </div>
+                    isToolsRefreshing ? (
+                      <div className="flex items-center justify-center h-20">
+                        <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-solid border-indigo-600 border-r-transparent align-[-0.125em] mr-2"></div>
+                        <p className="text-gray-600">Loading tools...</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg  space-y-4">
+                        <div className="p-4 bg-indigo-100 rounded-full">
+                          <Wrench className="w-8 h-8 text-indigo-600" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-gray-800">No Tools Available</h3>
+                        
+                        <p className="text-gray-600 max-w-md">
+                          
+                          <span className="block mt-3">To set them up, go to the <span className="font-semibold">MCP page</span>, select the relevant <span className="font-semibold">connector</span>, and choose the tools you want to enable.</span>
+                        </p>
+                        <div className="flex flex-wrap gap-3 justify-center mt-2">
+                          <a 
+                            href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
+                            target="_blank" 
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
+                          >
+                             Add Tools
+                          </a>
+                          
+                        </div>
+                      </div>
+                    )
                   )}
                 </>
-              ) : sidebarView === 'widgets' ? (
+              ) : sidebarView === 'apps' ? (
                 <div className="h-full w-full min-h-[500px]">
                   <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xl font-bold">Available Widgets</h2>
+                    <h2 className="text-xl font-bold">Available Apps</h2>
                     <button
                       onClick={loadWidgets}
-                      disabled={isRefreshing || !apiKey || !spaceId || !tenantId}
-                      className={`p-2 rounded-full hover:bg-gray-100 ${(!apiKey || !spaceId || !tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!apiKey || !spaceId || !tenantId ? "Enter Credentials to Load Widgets" : "Refresh Widgets"}
+                      disabled={isAppsRefreshing || !tenantId}
+                      className={`p-2 rounded-full hover:bg-gray-100 ${(!tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={!tenantId ? "Enter Tenant ID to Load Apps" : "Refresh Apps"}
                     >
-                      <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-5 h-5 ${isAppsRefreshing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
-                  {spaceId && tenantId && apiKey && authToken ? (
+                  {tenantId && authToken ? (
                     <>
                       {widgetMounted && (
-                        <FastnWidget
-                          key={widgetKey}
-                          projectId={spaceId}
-                          authToken={authToken}
-                          tenantId={tenantId}
-                          apiKey={apiKey}
-                          theme="light"
-                          env="LIVE"
-                          style={{
-                            height: '100%',
-                            width: '100%',
-                            border: 'none',
-                            borderRadius: '8px',
-                          }}
-                        />
+                        <>
+                          {connectorsDataNull ? (
+                            <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+                              <div className="p-4 bg-indigo-100 rounded-full">
+                                <LayoutGrid className="w-8 h-8 text-indigo-600" />
+                              </div>
+                              <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
+                              
+                              <p className="text-gray-600 max-w-md">
+                               
+                                <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
+                              </p>
+                              <div className="flex flex-wrap gap-3 justify-center mt-2">
+                                <a 
+                                  href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
+                                  target="_blank" 
+                                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
+                                >
+                                  Go to MCP
+                                </a>
+                               
+                              </div>
+                            </div>
+                          ) : (
+                            <FastnWidget
+                              key={widgetKey}
+                              projectId={spaceId}
+                              authToken={authToken}
+                              tenantId={tenantId}
+                              apiKey={apiKey}
+                              theme="light"
+                              env="DRAFT"
+                              style={{
+                                height: '100%',
+                                width: '100%',
+                                border: 'none',
+                                borderRadius: '8px',
+                              }}
+                             
+                            />
+                          )}
+                          
+                          {/* Response display panel */}
+                          {widgetResponses.length > 0 && (
+                            <div className="mt-4 border border-gray-200 rounded-md bg-gray-50 p-2">
+                              <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-sm font-semibold">Widget Responses ({widgetResponses.length})</h3>
+                                <div className="flex space-x-2">
+                                  <button 
+                                    onClick={inspectWidgetContent}
+                                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                                  >
+                                    Inspect Widget
+                                  </button>
+                                  <button 
+                                    onClick={monitorWidgetConsole}
+                                    className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
+                                  >
+                                    Monitor Console
+                                  </button>
+                                  <button 
+                                    onClick={testWidgetAPI}
+                                    className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+                                  >
+                                    Test API
+                                  </button>
+                                  <button 
+                                    onClick={simulateNullConnectors}
+                                    className="text-xs bg-purple-500 text-white px-2 py-1 rounded hover:bg-purple-600"
+                                  >
+                                    Simulate Null
+                                  </button>
+                                  <button 
+                                    onClick={() => setWidgetResponses([])}
+                                    className="text-xs text-red-500 hover:underline"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="max-h-40 overflow-y-auto text-xs">
+                                {widgetResponses.slice().reverse().map((response, idx) => (
+                                  <div key={idx} className="mb-2 border-b border-gray-200 pb-1">
+                                    <div className="text-gray-500">{response.timestamp}</div>
+                                    <pre className="whitespace-pre-wrap overflow-x-auto bg-white p-1 rounded">
+                                      {JSON.stringify(response.data, null, 2)}
+                                    </pre>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </>
                   ) : (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-gray-500 text-center text-sm px-4">
-                        Enter Space ID, Tenant ID, and API Key to view available widgets.
+                        Enter Tenant ID to view available Apps.
                       </p>
                     </div>
                   )}
@@ -886,6 +1765,7 @@ Result: ${JSON.stringify(response)}`,
                   
                   <div className="space-y-3">
                     {/* Authentication section - always visible */}
+                    
                     <AuthBox 
                       header={
                         <div className="flex items-center justify-between w-full">
@@ -901,16 +1781,34 @@ Result: ${JSON.stringify(response)}`,
                             <h3 className="font-semibold">Authentication</h3>
                           </div>
                           {authStatus === 'success' && (
+                            <>
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation(); // Prevent toggling the box when clicking the logout button
                                 handleLogout();
                               }}
                               className="p-1 rounded-full text-gray-600 hover:text-red-600"
-                              title="Logout"
+                              data-tooltip-id="logout"
+                              data-tooltip-content={"Logout"}
                             >
                               <LogOut className="w-4 h-4" />
                             </button>
+                            <Tooltip
+                            style={{
+                              borderRadius: "4px",
+                              border: "1px solid #000",
+                              backgroundColor: "#000",
+                              color: "#fff",
+                              zIndex: 30,
+                              fontSize: "12px",
+                              padding: "4px 8px",
+                              maxWidth: "80px"
+                            }}
+                            id="logout"
+                            place="top"
+                            delayHide={100}
+                            delayShow={300}
+                          /></>
                           )}
                         </div>
                       }
@@ -979,6 +1877,14 @@ Result: ${JSON.stringify(response)}`,
                               'Login'
                             )}
                           </button>
+                          
+                          {authStatus !== 'success' && (
+                            <div className="text-center mt-3">
+                              <p className="text-sm text-gray-600">
+                                Don't have an account? <a href="https://live.fastn.ai" className="text-indigo-700 hover:underline" target="_blank">Sign up here</a>
+                              </p>
+                            </div>
+                          )}
                         </>
                       }
                       isCollapsible={true}
@@ -986,7 +1892,6 @@ Result: ${JSON.stringify(response)}`,
                       isExpanded={authBoxExpanded}
                       onToggle={(expanded) => setAuthBoxExpanded(expanded)}
                     />
-                    
                     {/* API Configuration - only visible when logged in */}
                     {authStatus === 'success' && (
                       <AuthBox 
@@ -998,29 +1903,6 @@ Result: ${JSON.stringify(response)}`,
                         body={
                           <div className="space-y-3">
                             <div>
-                              <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type={showApiKey ? "text" : "password"}
-                                  id="config-apiKey"
-                                  value={apiKey}
-                                  onChange={(e) => setApiKey(e.target.value)}
-                                  placeholder="Enter your API Key"
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm pr-10"
-                                />
-                                <button 
-                                  type="button"
-                                  onClick={() => setShowApiKey(!showApiKey)}
-                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                                >
-                                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              </div>
-                            </div>
-                            <div>
                               <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
                                 <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
                               </label>
@@ -1028,7 +1910,7 @@ Result: ${JSON.stringify(response)}`,
                                 type="text"
                                 id="config-spaceId"
                                 value={spaceId}
-                                onChange={(e) => setSpaceId(e.target.value)}
+                                onChange={handleSpaceIdChange}
                                 placeholder="Enter your Space ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
@@ -1041,7 +1923,7 @@ Result: ${JSON.stringify(response)}`,
                                 type="text"
                                 id="config-tenantId"
                                 value={tenantId}
-                                onChange={(e) => setTenantId(e.target.value)}
+                                onChange={handleTenantIdChange}
                                 placeholder="Enter your Tenant ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
@@ -1070,12 +1952,20 @@ Result: ${JSON.stringify(response)}`,
                       />
                     )}
                     
+                    
                     {/* Credentials warning */}
-                    {authStatus === 'success' && (!apiKey || !spaceId) && (
+                    {/* {authStatus === 'success' && (!tenantId) && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
-                        <p className="text-red-600 text-sm">API Key and Space ID are required to load and use tools.</p>
+                        <p className="text-red-600 text-sm">Tenant ID is required to load and use apps.</p>
                       </div>
-                    )}
+                    )} */}
+                    
+                    {/* Space ID warning */}
+                    {/* {authStatus === 'success' && (!spaceId?.trim()) && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
+                        <p className="text-red-600 text-sm">Space ID is required to load and use tools and apps.</p>
+                      </div>
+                    )} */}
                     
                     {/* Credentials properly set confirmation */}
                   

@@ -1,9 +1,8 @@
 import { Message } from './types';
 
 // Backend API Configuration
-const FASTN_API_URL = 'https://live.fastn.ai/api/v1/llmCall';
-const FASTN_API_KEY = '4f657c13-0f37-4278-90c2-19bc64d0d79a';
-const FASTN_SPACE_ID = 'a964a451-7538-4e34-ac6c-693a2f087fe4';
+const FASTN_API_URL = 'https://live.fastn.ai/api/ucl/llmCall';
+
 
 export interface AIResponse {
   response: string;
@@ -142,17 +141,17 @@ function convertToolsAnthropicFormat(tools: any[]) {
   return tools.map(tool => {
     if (tool.type === 'function' && tool.function) {
       const { name, parameters, description } = tool.function;
-
-      // Extract required fields from parameters
-      const requiredFields = parameters.required || [];
+      
+      // Format the name to ensure it only contains allowed characters
+      const formattedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
 
       return {
-        "name": name,
+        "name": formattedName,
         "description": description,
         "input_schema": {
           "type": "object",
           "properties": parameters.properties || {},  // Preserve the original properties structure
-          "required": requiredFields
+          "required": parameters.required || []
         }
       };
     }
@@ -171,8 +170,11 @@ function convertToolsGeminiFormat(tools: any[]) {
     if (tool.type === 'function' && tool.function) {
       const { name, parameters, description } = tool.function;
       
+      // Format the name to ensure it only contains allowed characters
+      const formattedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      
       return {
-        name,
+        name: formattedName,
         description,
         parameters: {
           type: parameters.type,
@@ -193,22 +195,38 @@ function convertToolsGeminiFormat(tools: any[]) {
 }
 
 // Function to call the backend API and get response
-const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, _tenantId?: string) => {
+const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, spaceId?: string) => {
+  // Get the auth token from localStorage
+  const authToken = localStorage.getItem('fastnAuthToken') || '';
+  
   const headers: Record<string, string> = {
-    'x-fastn-api-key': FASTN_API_KEY,
     'Content-Type': 'application/json',
-    'x-fastn-space-id': FASTN_SPACE_ID,
-    'stage': 'LIVE'
+    'x-fastn-space-id' : spaceId || '',
+    'stage': 'LIVE',
+    'x-fastn-custom-auth': "true",
+    'authorization': `Bearer ${authToken}`
   };
 
-  // Don't add tenant ID to llmCall API
+  // Format tool names to ensure they meet API requirements 
+  const formattedTools = tools.map(tool => {
+    if (tool.type === 'function' && tool.function && tool.function.name) {
+      return {
+        ...tool,
+        function: {
+          ...tool.function,
+          name: tool.function.name.replace(/[^a-zA-Z0-9_-]/g, '_')
+        }
+      };
+    }
+    return tool;
+  });
 
   // Determine which tool format to use based on model name
-  let formattedTools = tools;
+  let processedTools = formattedTools;
   const requestBody: any = {
     input: {
       messages,
-      tools: formattedTools
+      tools: processedTools
     }
   };
   
@@ -219,14 +237,14 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
     
     // Check for Anthropic models
     if (modelName.includes('claude')) {
-      formattedTools = convertToolsAnthropicFormat(tools);
-      requestBody.input.tools = formattedTools;
+      processedTools = convertToolsAnthropicFormat(tools);
+      requestBody.input.tools = processedTools;
     } 
     // Check for Gemini models
     else if (modelName.includes('gemini')) {
-      formattedTools = convertToolsGeminiFormat(tools);
+      processedTools = convertToolsGeminiFormat(tools);
       // For Gemini, the format is different - tools is an array at the top level
-      requestBody.input.tools = formattedTools;
+      requestBody.input.tools = processedTools;
     }
     // For OpenAI models (gpt), use the original format
   }
@@ -236,6 +254,7 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
   console.log('Sending request to LLM API:', {
     url: FASTN_API_URL,
     modelName,
+    spaceId,
     bodyPreview: { ...requestBody, input: { ...requestBody.input, messages: '[redacted]' } }
   });
 
@@ -264,7 +283,7 @@ export const getStreamingAIResponse = async (
   onChunk: (text: string) => void,
   onComplete: (response: AIResponse) => void,
   modelName?: string,
-  tenantId?: string // Keep parameter but don't use it
+  spaceId?: string 
 ) => {
   try {
     // Format previous messages for the backend
@@ -277,8 +296,8 @@ export const getStreamingAIResponse = async (
       { role: 'user' as const, content: message }
     ];
 
-    // Call the backend API - pass only modelName, not tenantId
-    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
+    // Call the backend API - pass spaceId
+    const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
 
     // Handle different response formats based on model type
     let responseText = '';
@@ -386,7 +405,7 @@ export const getToolExecutionResponse = async (
   onChunk?: (text: string) => void,
   onComplete?: (response: AIResponse) => void,
   modelName?: string,
-  tenantId?: string
+  spaceId?: string
 ): Promise<AIResponse> => {
   try {
     // Format previous messages for the backend
@@ -434,8 +453,8 @@ export const getToolExecutionResponse = async (
     // Log conversation for debugging
     console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
 
-    // Call the backend API - pass only modelName, not tenantId
-    const backendResponse = await callBackendAPI(messages, availableTools, modelName);
+   // Call the backend API - pass spaceId
+   const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
 
     // Handle error response
     if (!backendResponse || backendResponse.error) {
