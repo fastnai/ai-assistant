@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
-import { getTools, executeTool, getConnectors } from './api';
+import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
 import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut, Bot } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
@@ -186,6 +186,10 @@ function App() {
     console.log('User logged out');
   };
 
+  // Add state for tracking input focus
+  const [isSpaceIdFocused, setIsSpaceIdFocused] = useState(false);
+  const [isTenantIdFocused, setIsTenantIdFocused] = useState(false);
+
   // Function to handle Space ID change
   const handleSpaceIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newSpaceId = e.target.value;
@@ -195,20 +199,6 @@ function App() {
     setAvailableTools([]);
     setConversation({ messages: [] });
     setToolResults({});
-    
-    // Automatically load tools if authenticated and space ID is provided
-    if (authStatus === 'success' && authToken && newSpaceId.trim()) {
-      // Use setTimeout to allow state update to complete first
-      setTimeout(() => {
-        loadTools();
-        // Also load widgets if tenant ID is available
-        if (tenantId?.trim()) {
-          loadWidgets();
-          // Navigate to apps tab if both Space ID and Tenant ID are provided
-          setSidebarView('apps');
-        }
-      }, 100);
-    }
   };
 
   // Function to handle Tenant ID change
@@ -219,17 +209,47 @@ function App() {
     // Reset widget data when Tenant ID changes
     setWidgetMounted(false);
     setWidgetKey(prevKey => prevKey + 1);
-    
-    // Automatically load widgets if authenticated and both tenant ID and space ID are provided
-    if (authStatus === 'success' && authToken && newTenantId.trim() && spaceId?.trim()) {
-      // Use setTimeout to allow state update to complete first
-      setTimeout(() => {
-        loadWidgets();
-        // Navigate to apps tab when both IDs are provided
-        setSidebarView('apps');
-      }, 100);
-    }
   };
+
+  // Add debounced functions for loading tools and widgets after typing
+  const [debouncedLoadExecutor, setDebouncedLoadExecutor] = useState<NodeJS.Timeout | null>(null);
+
+  // Effect to load tools and widgets after user finishes typing and unfocuses
+  useEffect(() => {
+    // Clear any existing timeout
+    if (debouncedLoadExecutor) {
+      clearTimeout(debouncedLoadExecutor);
+    }
+    
+    // Only proceed if neither field is focused
+    const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused;
+    
+    // If both values are provided and user is authenticated, set a new timeout
+    if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
+      const timeoutId = setTimeout(() => {
+        loadTools();
+        loadWidgets();
+        // Navigate to apps tab if both Space ID and Tenant ID are provided
+        setSidebarView('apps');
+      }, 500); // 500ms debounce
+      
+      setDebouncedLoadExecutor(timeoutId);
+    } else if (authStatus === 'success' && authToken && spaceId?.trim() && !isAnyFieldFocused) {
+      // If only Space ID is provided, just load tools
+      const timeoutId = setTimeout(() => {
+        loadTools();
+      }, 500); // 500ms debounce
+      
+      setDebouncedLoadExecutor(timeoutId);
+    }
+    
+    // Cleanup function to clear the timeout when component unmounts or dependencies change
+    return () => {
+      if (debouncedLoadExecutor) {
+        clearTimeout(debouncedLoadExecutor);
+      }
+    };
+  }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused]);
 
   // Function to fetch auth token when username and password are available
   const fetchAuthToken = async (forceRefresh = false) => {
@@ -401,16 +421,9 @@ function App() {
       // Reset connectors data status when reloading
       setConnectorsDataNull(false);
       
-      // Check if connectors are available using the new API function
-      const hasConnectors = await getConnectors(spaceId, tenantId);
-      
-      if (!hasConnectors) {
-        // If no connectors are available, update state without mounting widget
-        setConnectorsDataNull(true);
-        console.log('No apps available - setting connectorsDataNull to true');
-        setIsAppsRefreshing(false);
-        return;
-      }
+      // Instead of making an API call to check connectors, we'll mount the widget
+      // and rely on the message event listener to determine if connectors are available
+      console.log('Setting up widget to detect connector availability');
       
       // Force remount of the FastnWidget component
       setWidgetMounted(false);
@@ -852,6 +865,8 @@ Result: ${JSON.stringify(response)}`,
               setConnectorsDataNull(true);
             }
             
+            // No need to check for no_connector_found event here as we have a dedicated listener
+            
             // Store widget responses with timestamp
             setWidgetResponses(prev => [
               ...prev, 
@@ -1018,26 +1033,24 @@ Result: ${JSON.stringify(response)}`,
 
   // Effect to check connector availability when tenantId or spaceId changes
   useEffect(() => {
-    const checkConnectorAvailability = async () => {
-      if (tenantId && spaceId && authStatus === 'success' && authToken) {
-        try {
-          console.log('Checking connector availability...');
-          const hasConnectors = await getConnectors(spaceId, tenantId);
-          setConnectorsDataNull(!hasConnectors);
-          
-          if (!hasConnectors) {
-            console.log('No apps available - detected in initial connectors check');
-          } else {
-            console.log('Apps are available - found connectors in initial check');
-          }
-        } catch (error) {
-          console.error('Error checking connector availability:', error);
-        }
+    // We won't be using the getConnectors API anymore
+    // Instead, we'll rely on widget loading and message event listeners
+    // to determine connector availability
+    if (tenantId && spaceId && authStatus === 'success' && authToken) {
+      // Reset the state when changing tenant or space
+      setConnectorsDataNull(false);
+      
+      if (sidebarView === 'apps') {
+        console.log('Tenant/Space changed - will check for connectors via widget events');
+        // Reload the widget, which will trigger message events for connector availability
+        setWidgetMounted(false);
+        setWidgetKey(prevKey => prevKey + 1);
+        setTimeout(() => {
+          setWidgetMounted(true);
+        }, 1000);
       }
-    };
-    
-    checkConnectorAvailability();
-  }, [tenantId, spaceId, authStatus, authToken]);
+    }
+  }, [tenantId, spaceId, authStatus, authToken, sidebarView]);
 
   // Function to inspect widget iframe content
   const inspectWidgetContent = () => {
@@ -1378,6 +1391,93 @@ Result: ${JSON.stringify(response)}`,
     }
   }, [sidebarView, authStatus, widgetResponses]);
 
+  // Effect to specifically listen for the no_connector_found event
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && typeof event.data === 'object' && event.data.eventType === "no_connector_found") {
+        console.log('No connector found event detected in dedicated listener');
+        setConnectorsDataNull(true);
+        
+        // Show message for user by adding to widget responses
+        setWidgetResponses(prev => [
+          ...prev, 
+          { 
+            timestamp: new Date().toISOString(),
+            data: { 
+              type: 'NO_CONNECTOR_FOUND_DEDICATED',
+              message: 'No connectors available. Please activate connectors in MCP.',
+              source: 'dedicated_listener'
+            } 
+          }
+        ]);
+      }
+    };
+    
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, []);
+
+  // Effect to specifically listen for connector-related events
+  useEffect(() => {
+    const handleConnectorEvents = (event: MessageEvent) => {
+      // Only process if we have data and it's an object
+      if (event.data && typeof event.data === 'object') {
+        
+        // Handle explicit no_connector_found event
+        if (event.data.eventType === "no_connector_found") {
+          console.log('No connector found event detected in dedicated listener');
+          setConnectorsDataNull(true);
+          
+          // Show message for user by adding to widget responses
+          setWidgetResponses(prev => [
+            ...prev, 
+            { 
+              timestamp: new Date().toISOString(),
+              data: { 
+                type: 'NO_CONNECTOR_FOUND_DEDICATED',
+                message: 'No connectors available. Please activate connectors in MCP.',
+                source: 'dedicated_listener'
+              } 
+            }
+          ]);
+        }
+        
+        // Also check for empty connector data responses
+        if (event.data.type === 'CONNECTORS_DATA') {
+          const connectorsData = event.data.data;
+          const isEmpty = !connectorsData || 
+                         (Array.isArray(connectorsData) && connectorsData.length === 0) ||
+                         (typeof connectorsData === 'object' && Object.keys(connectorsData || {}).length === 0);
+          
+          if (isEmpty) {
+            console.log('Empty connectors data detected in dedicated listener');
+            setConnectorsDataNull(true);
+            
+            // Add to widget responses
+            setWidgetResponses(prev => [
+              ...prev, 
+              { 
+                timestamp: new Date().toISOString(),
+                data: { 
+                  type: 'EMPTY_CONNECTORS_DATA',
+                  message: 'No connectors available. Please activate connectors in MCP.',
+                  source: 'dedicated_listener'
+                } 
+              }
+            ]);
+          }
+        }
+      }
+    };
+    
+    window.addEventListener("message", handleConnectorEvents);
+    return () => {
+      window.removeEventListener("message", handleConnectorEvents);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
@@ -1585,7 +1685,7 @@ Result: ${JSON.stringify(response)}`,
                   </div>
                   
                   {availableTools.length > 0 ? (
-                    <div className="space-y-3">
+                    <div className="space-y-3 pb-4">
                       {availableTools.map((tool: Tool, index: number) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
                           <div className="flex items-center gap-2 mb-2">
@@ -1692,7 +1792,7 @@ Result: ${JSON.stringify(response)}`,
                           )}
                           
                           {/* Response display panel */}
-                          {widgetResponses.length > 0 && (
+                          {/* {widgetResponses.length > 0 && (
                             <div className="mt-4 border border-gray-200 rounded-md bg-gray-50 p-2">
                               <div className="flex justify-between items-center mb-2">
                                 <h3 className="text-sm font-semibold">Widget Responses ({widgetResponses.length})</h3>
@@ -1740,7 +1840,7 @@ Result: ${JSON.stringify(response)}`,
                                 ))}
                               </div>
                             </div>
-                          )}
+                          )} */}
                         </>
                       )}
                     </>
@@ -1905,6 +2005,8 @@ Result: ${JSON.stringify(response)}`,
                                 id="config-spaceId"
                                 value={spaceId}
                                 onChange={handleSpaceIdChange}
+                                onFocus={() => setIsSpaceIdFocused(true)}
+                                onBlur={() => setIsSpaceIdFocused(false)}
                                 placeholder="Enter your Space ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
@@ -1918,6 +2020,8 @@ Result: ${JSON.stringify(response)}`,
                                 id="config-tenantId"
                                 value={tenantId}
                                 onChange={handleTenantIdChange}
+                                onFocus={() => setIsTenantIdFocused(true)}
+                                onBlur={() => setIsTenantIdFocused(false)}
                                 placeholder="Enter your Tenant ID"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />

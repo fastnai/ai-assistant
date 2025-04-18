@@ -143,51 +143,6 @@ api.interceptors.response.use(
   }
 );
 
-// New function to check if connectors are available
-export const getConnectors = async (spaceId: string, tenantId: string): Promise<boolean> => {
-  if (!spaceId || !tenantId) {
-    console.warn('Space ID or Tenant ID is missing. Cannot fetch connectors.');
-    return false;
-  }
-  
-  try {
-    const response = await api.post('/api/graphql', {
-      query: `query connectors($input: GetConnectorsListInput!) {
-        connectors(input: $input) {
-          id
-        }
-      }`,
-      variables: {
-        input: {
-          projectId: spaceId,
-          tenantId: tenantId,
-          onlyActive: true,
-          environment: "DRAFT"
-        }
-      }
-    }, {
-      headers: {
-        'x-fastn-space-id': spaceId,
-        'x-fastn-space-tenantid': tenantId,
-        'custom-auth': 'true'
-      }
-    });
-    
-    // Check if connectors data exists and is not empty
-    const connectorsData = response.data?.data?.connectors;
-    const hasConnectors = Array.isArray(connectorsData) && connectorsData.length > 0;
-    
-    if (!hasConnectors) {
-      console.log('No apps available - connectors data is empty or null');
-    }
-    
-    return hasConnectors;
-  } catch (error) {
-    console.error('Error fetching connectors:', error);
-    return false;
-  }
-};
-
 export const getTools = async (useCase: string, spaceId: string, authToken: string, tenantId?: string): Promise<Tool[]> => {
 
   try {
