@@ -188,11 +188,12 @@ export const getConnectors = async (spaceId: string, tenantId: string): Promise<
   }
 };
 
-export const getTools = async (useCase: string, apiKey: string, spaceId: string, tenantId?: string): Promise<Tool[]> => {
-  if (!apiKey || !spaceId) {
-    console.warn('API Key or Space ID is missing. Cannot fetch tools.');
+export const getTools = async (useCase: string, spaceId: string, tenantId?: string): Promise<Tool[]> => {
+  if (!spaceId) {
+    console.warn('Space ID is missing. Cannot fetch tools.');
     return [];
   }
+  
   try {
     const response = await api.post('/api/ucl/getTools', {
       input: {
@@ -201,7 +202,6 @@ export const getTools = async (useCase: string, apiKey: string, spaceId: string,
       },
     }, {
       headers: {
-        // 'x-fastn-api-key': apiKey,
         'x-fastn-space-id': spaceId,
         'x-fastn-space-tenantid': tenantId || '',
       }

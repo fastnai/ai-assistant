@@ -340,7 +340,7 @@ function App() {
       setError('Authentication required to load tools.');
       return;
     }
-    
+    console.log('Loading tools');
     // Check if token is valid, refresh if needed
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
@@ -358,7 +358,8 @@ function App() {
       setIsToolsRefreshing(true);
       setError(null);
       // Pass apiKey and spaceId to getTools
-      const tools = await getTools('chat', apiKey, spaceId, tenantId);
+      const tools = await getTools('chat', spaceId, tenantId);
+      console.log('Tools loaded:', tools);
       setAvailableTools(tools);
     } catch (error) {
       console.error('Error loading tools:', error);
@@ -1423,8 +1424,8 @@ Result: ${JSON.stringify(response)}`,
                         Create an account
                       </p>
                       <p className="font-[600] mb-2 flex items-center text-indigo-700">
-                      <div className={`w-5 h-5 border ${!connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
-                      {connectorsDataNull && <span className="text-white">✓</span>}
+                      <div className={`w-5 h-5 border ${connectorsDataNull ? 'border-indigo-300' : ' bg-indigo-600 border-indigo-700'} rounded mr-2 flex items-center justify-center`}>
+                      {!connectorsDataNull && <span className="text-white">✓</span>}
                         </div>
                         Activate connectors (via MCP)
                       </p>
@@ -1435,9 +1436,6 @@ Result: ${JSON.stringify(response)}`,
                         Select your tools
                       </p>
                     </div>
-                  
-                    
-                
                 </div>
               ) :(authStatus === 'success' && !connectorsDataNull && availableTools.length > 0 && conversation.messages.length === 0)? (
               <div className="flex flex-col h-full items-center justify-center text-indigo-700 text-[17px]">
