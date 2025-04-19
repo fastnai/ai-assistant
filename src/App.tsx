@@ -1653,9 +1653,9 @@ Result: ${JSON.stringify(response)}`,
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
-      <div className="flex h-screen overflow-hidden justify-center">
+      <div className="flex h-screen overflow-hidden justify-center items-center">
         {/* Chat area */}
-        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? 'py-[130px]' : 'h-full'}`}>
+        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? '' : 'h-full'}`}>
           {/* Header */}
           <div className="flex flex-col items-center pt-6 pb-4">
             <Bot 
@@ -1673,8 +1673,8 @@ Result: ${JSON.stringify(response)}`,
           )} */}
           
           {/* Chat messages */}
-          <div className={`flex-1 px-4 ${conversation.messages.length === 0 ? '' : ''}`}>
-            <div className={`bg-white rounded-lg shadow-md px-4 h-full space-y-4 relative ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
+          <div className={`px-4 ${conversation.messages.length === 0 ? 'h-[300px]' : 'flex-1 overflow-hidden'}`}>
+            <div className={`bg-white rounded-lg shadow-md px-4 h-full space-y-4 relative  ${conversation.messages.length === 0 ? 'overflow-y-hidden' : 'overflow-y-auto'}`}>
             {conversation.messages.length > 0 &&<div className='w-full py-0.5 bg-white sticky left-0 top-0  z-20 justify-between flex flex-row'>
               <div></div>
               <button
