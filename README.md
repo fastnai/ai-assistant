@@ -1,3 +1,7 @@
+# AI Assistant
+
+A repository containing AI assistant implementation by FastNAI.
+
 # AI Assistant with Tool Integration
 
 This React application provides an AI assistant that can interact with various tools and execute them based on user requests. It uses the Gemini API for natural language processing and connects to various services like Gmail, Slack, Google Calendar, and more.
