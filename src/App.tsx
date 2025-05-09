@@ -10,6 +10,15 @@ import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
 import AuthBox from './components/AuthBox';
 import { Tooltip } from "react-tooltip";
+import { User as OidcUser } from 'oidc-client-ts';
+
+// Add interface for extended user type
+interface ExtendedUser extends OidcUser {
+  expires_in: number;
+  refresh_expires_in: number;
+  access_token: string;
+  refresh_token: string;
+}
 
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
@@ -157,6 +166,20 @@ function App() {
   const [connectorsDataNull, setConnectorsDataNull] = useState<boolean | null>(null);
   const widgetIframeRef = useRef<HTMLIFrameElement | null>(null);
   const auth = useAuth();
+  // Add ref for ChatInput
+  const chatInputRef = useRef<ChatInputHandles>(null);
+
+  // Add state for password
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Effect to automatically redirect to Keycloak when not authenticated
+  useEffect(() => {
+    if (!auth.isLoading && !auth.isAuthenticated) {
+      console.log('User not authenticated, redirecting to Keycloak...');
+      auth.signinRedirect();
+    }
+  }, [auth.isLoading, auth.isAuthenticated, auth]);
+
   // Available models that support tool calls
   const modelsWithToolCalls = [
     // { name: 'Claude 3.7 Sonnet', id: 'claude-3-7-sonnet-20250219' },
@@ -240,11 +263,53 @@ function App() {
     localStorage.setItem('fastnRefreshTokenExpiryTime', refreshTokenExpiryTime.toString());
   }, [refreshTokenExpiryTime]);
 
-  // Add ref for ChatInput
-  const chatInputRef = useRef<ChatInputHandles>(null);
+  // Effect to handle authentication state
+  useEffect(() => {
+    if (auth.isLoading) {
+      setAuthStatus('loading');
+    } else if (auth.isAuthenticated) {
+      setAuthStatus('success');
+      const user = auth.user as ExtendedUser;
+      setAuthToken(user.access_token);
+      setRefreshToken(user.refresh_token);
+      
+      // Calculate token expiry times
+      const now = Date.now();
+      setTokenExpiryTime(now + (user.expires_in * 1000));
+      setRefreshTokenExpiryTime(now + (user.refresh_expires_in * 1000));
+      
+      // Automatically hide the auth box on successful login
+      setAuthBoxExpanded(false);
+      
+      // Extract username from Keycloak if available
+      if (user.profile?.preferred_username) {
+        setUsername(user.profile.preferred_username);
+      } else if (user.profile?.email) {
+        // Fall back to email if preferred_username is not available
+        setUsername(user.profile.email);
+      }
+      
+      // Load tools once authenticated
+      loadTools();
+    } else {
+      setAuthStatus('idle');
+      setAuthToken('');
+      setRefreshToken('');
+      setTokenExpiryTime(0);
+      setRefreshTokenExpiryTime(0);
+    }
+  }, [auth.isLoading, auth.isAuthenticated, auth.user]);
+
+  // Function to handle login
+  const handleLogin = () => {
+    auth.signinRedirect();
+  };
 
   // Function to handle logout
   const handleLogout = () => {
+    // Use Keycloak's signoutRedirect to properly log out
+    auth.signoutRedirect();
+    
     // Clear authentication data
     setAuthToken('');
     setRefreshToken('');
@@ -285,6 +350,16 @@ function App() {
     setConversation({ messages: [] });
     console.log('User logged out');
   };
+
+  // Make sure unauthenticated users stay on the config tab
+  useEffect(() => {
+    if (authStatus !== 'success' && sidebarView !== 'config') {
+      setSidebarView('config');
+    }
+  }, [authStatus, sidebarView]);
+
+  const [isToolsRefreshing, setIsToolsRefreshing] = useState(false);
+  const [isAppsRefreshing, setIsAppsRefreshing] = useState(false);
 
   // Add state for tracking input focus
   const [isSpaceIdFocused, setIsSpaceIdFocused] = useState(false);
@@ -350,109 +425,6 @@ function App() {
       }
     };
   }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused]);
-
-  // Function to fetch auth token when username and password are available
-  const fetchAuthToken = async (forceRefresh = false) => {
-    if (!username || !password) {
-      setAuthStatus('idle');
-      return;
-    }
-    
-    // If we already have an auth token and successful status, no need to re-authenticate
-    // Unless forceRefresh is true (e.g., when login button is clicked)
-    if (authToken && authStatus === 'success' && !forceRefresh) {
-      console.log('Already authenticated with token');
-      return;
-    }
-    
-    try {
-      setAuthStatus('loading');
-      setAuthErrorMessage('');
-      
-      // Using the new API endpoint
-      const response = await fetch('https://live.fastn.ai/api/v1/generateFastnAccessToken', {
-        method: 'POST',
-        headers: {
-          'x-fastn-api-key': "21112588-769a-4311-a359-cf094bee5382",
-          'Content-Type': 'application/json',
-          'x-fastn-space-id': "43aea445-7772-4e45-b1e8-548b96c4bf2b",
-          'x-fastn-space-tenantid': '',
-          'stage': 'LIVE'
-        },
-        body: JSON.stringify({ 
-          input: {
-            username: username,
-            password: password
-          } 
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.error || errorData.message || `Auth API error: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      console.log('Auth token response:', data);
-      
-      // Extract the access_token directly from the response
-      const accessToken = data.access_token;
-      const refreshTokenValue = data.refresh_token;
-      const expiresIn = data.expires_in;
-      const refreshExpiresIn = data.refresh_expires_in;
-      
-      console.log('Using access token:', accessToken);
-      
-      if (!accessToken) {
-        throw new Error('No access token received from authentication server');
-      }
-      
-      // Calculate and set token expiry times
-      const now = Date.now();
-      setTokenExpiryTime(now + (parseInt(String(expiresIn)) * 1000)); // Convert seconds to milliseconds
-      setRefreshTokenExpiryTime(now + (parseInt(String(refreshExpiresIn)) * 1000)); // Convert seconds to milliseconds
-      
-      setAuthToken(accessToken);
-      setRefreshToken(refreshTokenValue);
-      setAuthStatus('success');
-      
-      // Close the auth box on successful login
-      setAuthBoxExpanded(false);
-      
-      // Load tools once authenticated
-      await loadTools();
-    } catch (error) {
-      console.error('Error fetching auth token:', error);
-      // Clear the token and status if authentication fails
-      setAuthToken('');
-      setRefreshToken('');
-      setAuthStatus('error');
-      setAuthErrorMessage('Authentication failed');
-    }
-  };
-
-  // Just checking if we have saved credentials on mount 
-  useEffect(() => {
-    if (username && password && authStatus === 'idle') {
-      console.log('Credentials found, trying to authenticate automatically');
-      fetchAuthToken(false); // Don't force refresh on initial load
-    } else if (authStatus === 'success' && authToken) {
-      console.log('Already authenticated, loading tools');
-      loadTools();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Make sure unauthenticated users stay on the config tab
-  useEffect(() => {
-    if (authStatus !== 'success' && sidebarView !== 'config') {
-      setSidebarView('config');
-    }
-  }, [authStatus, sidebarView]);
-
-  const [isToolsRefreshing, setIsToolsRefreshing] = useState(false);
-  const [isAppsRefreshing, setIsAppsRefreshing] = useState(false);
 
   const loadTools = async () => {
     // Verify we have a valid authentication token
@@ -897,167 +869,38 @@ Result: ${JSON.stringify(response)}`,
     return await ensureValidToken();
   };
   
-  // Handle API errors related to authentication
-  const handleApiError = (error: any) => {
-    // Extract status code if it's an axios error with response
-    const status = error.response?.status || error.status;
-    const message = error.message || '';
+  // Function to check if Keycloak session is still valid
+  const checkKeycloakSession = async () => {
+    if (!authToken) return false;
     
-    // Check if the error is an authentication error
-    const isAuthError = status === 401 || 
-                        message.includes('auth') || 
-                        message.includes('token') ||
-                        message.includes('unauthorized') ||
-                        message.includes('unauthenticated');
-    
-    if (isAuthError) {
-      console.error('Authentication error detected:', error);
+    try {
+      // Call Keycloak's userinfo endpoint to verify the token is still valid
+      const response = await fetch('https://live.fastn.ai/auth/realms/fastn/protocol/openid-connect/userinfo', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
       
-      // Attempt to refresh the token
-      refreshAccessToken()
-        .then(success => {
-          console.log(`Token refresh ${success ? 'succeeded' : 'failed'} after API error`);
-          if (!success) {
-            // If refresh fails, logout the user
-            console.error('Token refresh failed, logging out user');
-            handleLogout();
-          }
-        })
-        .catch(refreshError => {
-          console.error('Error during token refresh after API error:', refreshError);
-          handleLogout();
-        });
+      if (!response.ok) {
+        console.log('Keycloak session is no longer valid, logging out');
+        handleLogout();
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error checking Keycloak session:', error);
+      // Don't logout on network errors as they might be temporary
+      if (error instanceof TypeError && error.message.includes('network')) {
+        console.log('Network error during session check, will try again later');
+        return true;
+      }
+      
+      handleLogout();
+      return false;
     }
-    return error;
   };
-
-  // Verify token on initial load and when dependencies change
-  useEffect(() => {
-    if (authToken && authStatus === 'success') {
-      validateAuthToken().catch(handleApiError);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Add state for password
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Effect to initialize widget when first visiting widgets tab
-  useEffect(() => {
-    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
-      setWidgetMounted(true);
-      
-      // Debug all messages to find modal-related events
-      const handleAllMessages = (event: MessageEvent) => {
-        if (event.data) {
-          
-          // Look for any modal-related keywords in the event data
-          const eventStr = JSON.stringify(event.data).toLowerCase();
-          if (eventStr.includes('modal') || eventStr.includes('popup') || eventStr.includes('dialog')) {
-           
-            // Attempt to scroll to top
-            window.scrollTo(0, 0);
-            document.documentElement.scrollTop = 0;
-            
-            // Try scrolling with a timeout
-            setTimeout(() => {
-              window.scrollTo(0, 0);
-              document.body.scrollTop = 0;
-              document.documentElement.scrollTop = 0;
-            }, 300);
-          }
-        }
-      };
-      
-      // Add listener for all messages to debug
-      window.addEventListener('message', handleAllMessages);
-      
-      // Set up window message listener to capture widget responses
-      const handleWidgetMessage = (event: MessageEvent) => {
-        try {
-          
-          // Check if the message is from the FastnWidget
-          if (event.data && typeof event.data === 'object') {
-            
-            // Check for ANY event that might indicate a modal or dialog
-            if (
-              (event.data.type && (
-                event.data.type === "MODAL_OPENED" || 
-                event.data.type === "POPUP_OPENED" || 
-                event.data.type === "DIALOG_OPENED" ||
-                event.data.type.includes("MODAL") ||
-                event.data.type.includes("POPUP") ||
-                event.data.type.includes("DIALOG") ||
-                event.data.type.includes("OPEN")
-              )) || 
-              (event.data.eventType && (
-                event.data.eventType === "modal_opened" ||
-                event.data.eventType.includes("modal") ||
-                event.data.eventType.includes("popup") ||
-                event.data.eventType.includes("dialog") ||
-                event.data.eventType.includes("open")
-              ))
-            ) {
-              
-              // Try all possible scrolling methods
-              window.scrollTo(0, 0);
-              document.body.scrollTop = 0;
-              document.documentElement.scrollTop = 0;
-              
-              // Set multiple timeouts at different intervals to catch when modal is rendered
-              for (let delay of [100, 300, 500, 1000]) {
-                setTimeout(() => {
-                  window.scrollTo({ top: 0, behavior: 'auto' });
-                  document.body.scrollTop = 0;
-                  document.documentElement.scrollTop = 0;
-                  
-                  // Try to find any scrollable containers
-                  document.querySelectorAll('.overflow-auto, .overflow-y-auto, [style*="overflow"]').forEach(el => {
-                    (el as HTMLElement).scrollTop = 0;
-                  });
-                }, delay);
-              }
-            }
-            
-            // Check specifically for connectors data being null or empty array
-            if (event.data.type === 'CONNECTORS_DATA') {
-              if (
-                  event.data.data === null || 
-                  (Array.isArray(event.data.data) && event.data.data.length === 0) ||
-                  (typeof event.data.data === 'object' && Object.keys(event.data.data || {}).length === 0)
-                ) {
-                console.log('Connectors data is null or empty array');
-                setConnectorsDataNull(true); // No connectors available
-              } else {
-                console.log('Connectors data is available');
-                setConnectorsDataNull(false); // Connectors are available
-              }
-            }
-            
-            // Store widget responses with timestamp
-            setWidgetResponses(prev => [
-              ...prev, 
-              { 
-                timestamp: new Date().toISOString(),
-                data: event.data 
-              }
-            ]);
-          }
-        } catch (error) {
-          console.error('Error processing widget message:', error);
-        }
-      };
-      
-      // Add event listener
-      window.addEventListener('message', handleWidgetMessage);
-      
-      // Clean up event listener
-      return () => {
-        window.removeEventListener('message', handleWidgetMessage);
-        window.removeEventListener('message', handleAllMessages);
-      };
-    }
-  }, [sidebarView, widgetMounted, authStatus, tenantId, authToken]);
 
   // Function to refresh access token using refresh token
   const refreshAccessToken = async () => {
@@ -1166,6 +1009,12 @@ Result: ${JSON.stringify(response)}`,
       return false;
     }
     
+    // First check if Keycloak session is still valid
+    const isSessionValid = await checkKeycloakSession();
+    if (!isSessionValid) {
+      return false;
+    }
+    
     const now = Date.now();
     const timeUntilExpiry = tokenExpiryTime - now;
     
@@ -1183,21 +1032,49 @@ Result: ${JSON.stringify(response)}`,
     return await refreshAccessToken();
   };
 
-  // Check token validity periodically
-  useEffect(() => {
-    if (authStatus === 'success' && authToken) {
-      console.log('Setting up token refresh interval check');
-      const interval = setInterval(async () => {
-        // Check if token is valid and if it needs to be refreshed
-        await ensureValidToken();
-      }, 240000); // Check every 30 seconds
+  // Handle API errors related to authentication
+  const handleApiError = (error: any) => {
+    // Extract status code if it's an axios error with response
+    const status = error.response?.status || error.status;
+    const message = error.message || '';
+    
+    // Check if the error is an authentication error
+    const isAuthError = status === 401 || 
+                        status === 403 ||
+                        message.includes('auth') || 
+                        message.includes('token') ||
+                        message.includes('unauthorized') ||
+                        message.includes('unauthenticated') ||
+                        message.includes('forbidden');
+    
+    if (isAuthError) {
+      console.error('Authentication error detected:', error);
       
-      return () => {
-        console.log('Clearing token refresh interval');
-        clearInterval(interval);
-      };
+      // Force immediate session check
+      checkKeycloakSession().then(isValid => {
+        if (!isValid) {
+          console.log('Session is invalid after API error, logging out');
+          // handleLogout is already called in checkKeycloakSession if invalid
+        } else {
+          // If session is valid but we got an auth error, try refreshing the token
+          refreshAccessToken()
+            .then(success => {
+              console.log(`Token refresh ${success ? 'succeeded' : 'failed'} after API error`);
+              if (!success) {
+                // If refresh fails, logout the user
+                console.error('Token refresh failed, logging out user');
+                handleLogout();
+              }
+            })
+            .catch(refreshError => {
+              console.error('Error during token refresh after API error:', refreshError);
+              handleLogout();
+            });
+        }
+      });
     }
-  }, [authStatus, authToken, tokenExpiryTime, refreshToken]); // Add refreshToken to dependencies
+    return error;
+  };
 
   // Effect to check connector availability when tenantId or spaceId changes
   useEffect(() => {
@@ -1650,6 +1527,159 @@ Result: ${JSON.stringify(response)}`,
   }, []);
   console.log(connectorsDataNull)
 
+  // Effect to ensure auth box is collapsed for authenticated users
+  useEffect(() => {
+    if (authStatus === 'success') {
+      setAuthBoxExpanded(false);
+    }
+  }, [authStatus]);
+
+  // Effect to initialize widget when first visiting widgets tab
+  useEffect(() => {
+    if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
+      setWidgetMounted(true);
+      
+      // Debug all messages to find modal-related events
+      const handleAllMessages = (event: MessageEvent) => {
+        if (event.data) {
+          
+          // Look for any modal-related keywords in the event data
+          const eventStr = JSON.stringify(event.data).toLowerCase();
+          if (eventStr.includes('modal') || eventStr.includes('popup') || eventStr.includes('dialog')) {
+           
+            // Attempt to scroll to top
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            
+            // Try scrolling with a timeout
+            setTimeout(() => {
+              window.scrollTo(0, 0);
+              document.body.scrollTop = 0;
+              document.documentElement.scrollTop = 0;
+            }, 300);
+          }
+        }
+      };
+      
+      // Add listener for all messages to debug
+      window.addEventListener('message', handleAllMessages);
+      
+      // Set up window message listener to capture widget responses
+      const handleWidgetMessage = (event: MessageEvent) => {
+        try {
+          
+          // Check if the message is from the FastnWidget
+          if (event.data && typeof event.data === 'object') {
+            
+            // Check for ANY event that might indicate a modal or dialog
+            if (
+              (event.data.type && (
+                event.data.type === "MODAL_OPENED" || 
+                event.data.type === "POPUP_OPENED" || 
+                event.data.type === "DIALOG_OPENED" ||
+                event.data.type.includes("MODAL") ||
+                event.data.type.includes("POPUP") ||
+                event.data.type.includes("DIALOG") ||
+                event.data.type.includes("OPEN")
+              )) || 
+              (event.data.eventType && (
+                event.data.eventType === "modal_opened" ||
+                event.data.eventType.includes("modal") ||
+                event.data.eventType.includes("popup") ||
+                event.data.eventType.includes("dialog") ||
+                event.data.eventType.includes("open")
+              ))
+            ) {
+              
+              // Try all possible scrolling methods
+              window.scrollTo(0, 0);
+              document.body.scrollTop = 0;
+              document.documentElement.scrollTop = 0;
+              
+              // Set multiple timeouts at different intervals to catch when modal is rendered
+              for (let delay of [100, 300, 500, 1000]) {
+                setTimeout(() => {
+                  window.scrollTo({ top: 0, behavior: 'auto' });
+                  document.body.scrollTop = 0;
+                  document.documentElement.scrollTop = 0;
+                  
+                  // Try to find any scrollable containers
+                  document.querySelectorAll('.overflow-auto, .overflow-y-auto, [style*="overflow"]').forEach(el => {
+                    (el as HTMLElement).scrollTop = 0;
+                  });
+                }, delay);
+              }
+            }
+            
+            // Check specifically for connectors data being null or empty array
+            if (event.data.type === 'CONNECTORS_DATA') {
+              if (
+                  event.data.data === null || 
+                  (Array.isArray(event.data.data) && event.data.data.length === 0) ||
+                  (typeof event.data.data === 'object' && Object.keys(event.data.data || {}).length === 0)
+                ) {
+                console.log('Connectors data is null or empty array');
+                setConnectorsDataNull(true); // No connectors available
+              } else {
+                console.log('Connectors data is available');
+                setConnectorsDataNull(false); // Connectors are available
+              }
+            }
+            
+            // Store widget responses with timestamp
+            setWidgetResponses(prev => [
+              ...prev, 
+              { 
+                timestamp: new Date().toISOString(),
+                data: event.data 
+              }
+            ]);
+          }
+        } catch (error) {
+          console.error('Error processing widget message:', error);
+        }
+      };
+      
+      // Add event listener
+      window.addEventListener('message', handleWidgetMessage);
+      
+      // Clean up event listener
+      return () => {
+        window.removeEventListener('message', handleWidgetMessage);
+        window.removeEventListener('message', handleAllMessages);
+      };
+    }
+  }, [sidebarView, widgetMounted, authStatus, tenantId, authToken]);
+
+  // Verify token on initial load and when dependencies change
+  useEffect(() => {
+    if (authToken && authStatus === 'success') {
+      validateAuthToken().catch(handleApiError);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Check token validity periodically to detect external logouts
+  useEffect(() => {
+    if (authStatus === 'success' && authToken) {
+      console.log('Setting up token validity check interval');
+      const interval = setInterval(async () => {
+        // Check if Keycloak session is still valid
+        console.log('Checking token validity and Keycloak session...');
+        const isValid = await checkKeycloakSession();
+        if (!isValid) {
+          console.log('Keycloak session is no longer valid (detected in interval)');
+          // The checkKeycloakSession function already calls handleLogout if needed
+        }
+      }, 60000); // Check every minute
+      
+      return () => {
+        console.log('Clearing token validity check interval');
+        clearInterval(interval);
+      };
+    }
+  }, [authStatus, authToken]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
@@ -1776,8 +1806,11 @@ Result: ${JSON.stringify(response)}`,
                       loadTools();
                     }
                     
-                    // Remove automatic widget loading when switching to apps tab
-                    // User can use the refresh button if needed
+                    // If user tries to click on a tab requiring auth but isn't authenticated, prompt for Keycloak login
+                    if (id !== 'config' && authStatus !== 'success') {
+                      // Redirect to Keycloak login
+                      handleLogin();
+                    }
                   }
                 }}
                 tabs={[
@@ -1786,7 +1819,6 @@ Result: ${JSON.stringify(response)}`,
                     name: 'Config',
                     icon: <KeyRound className="w-4 h-4" />
                   },
-                  
                   {
                     id: 'apps',
                     name: 'Apps',
@@ -1799,7 +1831,8 @@ Result: ${JSON.stringify(response)}`,
                         : !spaceId?.trim() 
                           ? "Space ID is required to access Apps" 
                           : ""
-                  },{
+                  },
+                  {
                     id: 'tools',
                     name: 'Tools',
                     icon: <Wrench className="w-4 h-4" />,
@@ -2008,137 +2041,96 @@ Result: ${JSON.stringify(response)}`,
               ) : (
                 // Config View
                 <div className="space-y-4">
-                  <h2 className="text-xl font-bold mb-4">Configuration Settings</h2>
+                  <h2 className="text-xl font-bold mb-4 flex justify-between items-center">
+                    Configuration Settings
+                    {authStatus === 'success' && (
+                      <>
+                        <button 
+                          onClick={handleLogout}
+                          className="p-1 rounded-full text-gray-600 hover:text-red-600"
+                          data-tooltip-id="logout"
+                          data-tooltip-content="Logout"
+                        >
+                          <LogOut className="w-4 h-4" />
+                        </button>
+                        <Tooltip
+                          style={{
+                            borderRadius: "4px",
+                            border: "1px solid #000",
+                            backgroundColor: "#000",
+                            color: "#fff",
+                            zIndex: 30,
+                            fontSize: "12px",
+                            padding: "4px 8px",
+                            maxWidth: "80px"
+                          }}
+                          id="logout"
+                          place="top"
+                          delayHide={100}
+                          delayShow={300}
+                        />
+                      </>
+                    )}
+                  </h2>
                   
                   <div className="space-y-3">
-                    {/* Authentication section - always visible */}
-                    
-                    <AuthBox 
-                      header={
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center gap-2">
-                            <div 
-                              className={`w-3 h-3 rounded-full ${
-                                authStatus === 'idle' ? 'bg-gray-400' : 
-                                authStatus === 'loading' ? 'bg-yellow-400' : 
-                                authStatus === 'success' ? 'bg-green-400' : 
-                                'bg-red-400'
-                              }`}
-                            />
-                            <h3 className="font-semibold">Authentication</h3>
-                          </div>
-                          {authStatus === 'success' && (
-                            <>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent toggling the box when clicking the logout button
-                                handleLogout();
-                              }}
-                              className="p-1 rounded-full text-gray-600 hover:text-red-600"
-                              data-tooltip-id="logout"
-                              data-tooltip-content={"Logout"}
-                            >
-                              <LogOut className="w-4 h-4" />
-                            </button>
-                            <Tooltip
-                            style={{
-                              borderRadius: "4px",
-                              border: "1px solid #000",
-                              backgroundColor: "#000",
-                              color: "#fff",
-                              zIndex: 30,
-                              fontSize: "12px",
-                              padding: "4px 8px",
-                              maxWidth: "80px"
-                            }}
-                            id="logout"
-                            place="top"
-                            delayHide={100}
-                            delayShow={300}
-                          /></>
-                          )}
-                        </div>
-                      }
-                      body={
-                        <>
-                          {/* Username & Password fields */}
-                          <div className="space-y-3 mb-3">
-                          <span className="text-sm text-red-600">
-                          { 
-                           authStatus === 'error' && (authErrorMessage || 'Authentication failed')
-                           }
-                        </span>
-                            <div>
-                              <label htmlFor="config-username" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <User className="w-4 h-4 mr-1 text-gray-500" /> Username
-                              </label>
-                              <input
-                                type="text"
-                                id="config-username"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Enter your Username"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
-                              />
-                            </div>
-                            <div>
-                              <label htmlFor="config-password" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                                <Lock className="w-4 h-4 mr-1 text-gray-500" /> Password
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type={showPassword ? "text" : "password"}
-                                  id="config-password"
-                                  value={password}
-                                  onChange={(e) => setPassword(e.target.value)}
-                                  placeholder="Enter your Password"
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm pr-10"
-                                />
-                                <button 
-                                  type="button"
-                                  onClick={() => setShowPassword(!showPassword)}
-                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                                  aria-label={showPassword ? "Hide password" : "Show password"}
-                                >
-                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              </div>
+                    {/* Authentication section - only visible when not authenticated */}
+                    {authStatus !== 'success' && (
+                      <AuthBox 
+                        header={
+                          <div className="flex items-center justify-between w-full">
+                            <div className="flex items-center gap-2">
+                              {(() => {
+                                // Create a mapping of status to color class
+                                const statusColors: Record<'idle' | 'loading' | 'success' | 'error', string> = {
+                                  'idle': 'bg-gray-400',
+                                  'loading': 'bg-yellow-400',
+                                  'success': 'bg-green-400',
+                                  'error': 'bg-red-400'
+                                };
+                                
+                                // Use the mapped value or default to red
+                                const colorClass = statusColors[authStatus] || 'bg-red-400';
+                                
+                                return (
+                                  <div className={`w-3 h-3 rounded-full ${colorClass}`} />
+                                );
+                              })()}
+                              <h3 className="font-semibold">Authentication</h3>
                             </div>
                           </div>
-                          
-                          <button
-                            onClick={() => fetchAuthToken(true)}
-                            disabled={!username || !password || authStatus === 'loading'}
-                            className={`flex items-center justify-center w-full py-2 px-4 rounded-md text-white 
-                              ${(!username || !password || authStatus === 'loading') 
-                                ? 'bg-gray-400 cursor-not-allowed' 
-                                : 'bg-black hover:bg-white hover:text-black'}`}
-                          >
+                        }
+                        body={
+                          <>
                             {authStatus === 'loading' ? (
-                              <>
-                                <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent align-[-0.125em] mr-2"></div>
-                                Logging in...
-                              </>
+                              <div className="flex items-center justify-center py-4">
+                                <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-indigo-600 border-r-transparent align-[-0.125em] mr-2"></div>
+                                <p className="text-gray-600">Logging in...</p>
+                              </div>
                             ) : (
-                               authStatus === 'success'?'Reconnect':
-                              'Login'
+                              <div className="space-y-3">
+                                <button
+                                  onClick={handleLogin}
+                                  className="flex items-center justify-center w-full py-2 px-4 rounded-md text-white bg-black hover:bg-white hover:text-black transition-colors"
+                                >
+                                  Login with Keycloak
+                                </button>
+                                
+                                <div className="text-center mt-3">
+                                  <p className="text-sm text-gray-600">
+                                    Don't have an account? <a href="https://live.fastn.ai" className="text-indigo-700 hover:underline" target="_blank">Sign up here</a>
+                                  </p>
+                                </div>
+                              </div>
                             )}
-                          </button>
-                          
-                          {authStatus !== 'success' && (
-                            <div className="text-center mt-3">
-                              <p className="text-sm text-gray-600">
-                                Don't have an account? <a href="https://live.fastn.ai" className="text-indigo-700 hover:underline" target="_blank">Sign up here</a>
-                              </p>
-                            </div>
-                          )}
-                        </>
-                      }
-                      isCollapsible={true}
-                      defaultExpanded={authStatus !== 'success'}
-                      isExpanded={authBoxExpanded}
-                      onToggle={(expanded) => setAuthBoxExpanded(expanded)}
-                    />
+                          </>
+                        }
+                        isCollapsible={true}
+                        defaultExpanded={true}
+                        isExpanded={authBoxExpanded}
+                        onToggle={(expanded) => setAuthBoxExpanded(expanded)}
+                      />
+                    )}
                     {/* API Configuration - only visible when logged in */}
                     {authStatus === 'success' && (
                       <AuthBox 
@@ -2202,24 +2194,6 @@ Result: ${JSON.stringify(response)}`,
                         defaultExpanded={true}
                       />
                     )}
-                    
-                    
-                    {/* Credentials warning */}
-                    {/* {authStatus === 'success' && (!tenantId) && (
-                      <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
-                        <p className="text-red-600 text-sm">Tenant ID is required to load and use apps.</p>
-                      </div>
-                    )} */}
-                    
-                    {/* Space ID warning */}
-                    {/* {authStatus === 'success' && (!spaceId?.trim()) && (
-                      <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-2">
-                        <p className="text-red-600 text-sm">Space ID is required to load and use tools and apps.</p>
-                      </div>
-                    )} */}
-                    
-                    {/* Credentials properly set confirmation */}
-                  
                   </div>
                 </div>
               )}
