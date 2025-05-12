@@ -4,7 +4,7 @@ import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { PlayCircle, RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, ChevronDown, ChevronUp, User, Lock, Eye, EyeOff, LogOut, Bot } from 'lucide-react';
+import { RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, LogOut, Bot } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
@@ -126,10 +126,10 @@ function App() {
   }, []); // Empty dependency array means this only runs once
   
   const [isLoading, setIsLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [currentJson, setCurrentJson] = useState<any>(null);
+  // const [isRefreshing, setIsRefreshing] = useState(false);
+  // const [currentJson, setCurrentJson] = useState<any>(null);
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // const [error, setError] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [streamingText, setStreamingText] = useState('');
   const [toolResults, setToolResults] = useState<Record<string, any>>({});
@@ -154,7 +154,7 @@ function App() {
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(() => 
     (localStorage.getItem('fastnAuthStatus') as 'idle' | 'loading' | 'success' | 'error') || 'idle'
   );
-  const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
+  // const [authErrorMessage, setAuthErrorMessage] = useState<string>('');
   const [tokenExpiryTime, setTokenExpiryTime] = useState<number>(() => {
     const saved = localStorage.getItem('fastnTokenExpiryTime');
     return saved ? parseInt(saved) : 0;
@@ -168,18 +168,18 @@ function App() {
   const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
   const [widgetResponses, setWidgetResponses] = useState<any[]>([]);
   const [connectorsDataNull, setConnectorsDataNull] = useState<boolean | null>(null);
-  const widgetIframeRef = useRef<HTMLIFrameElement | null>(null);
+  // const widgetIframeRef = useRef<HTMLIFrameElement | null>(null);
   const auth = useAuth();
   // Add ref for ChatInput
   const chatInputRef = useRef<ChatInputHandles>(null);
 
   // Add state for password
-  const [showPassword, setShowPassword] = useState(false);
+  // const [showPassword, setShowPassword] = useState(false);
 
   // Add these state variables near the top with other state declarations
-  const [lastToolsLoadTime, setLastToolsLoadTime] = useState<number>(0);
+  // const [lastToolsLoadTime, setLastToolsLoadTime] = useState<number>(0);
   const [lastWidgetsLoadTime, setLastWidgetsLoadTime] = useState<number>(0);
-  const TOOLS_REFRESH_INTERVAL = 30000; // 30 seconds
+  // const TOOLS_REFRESH_INTERVAL = 30000; // 30 seconds
   const WIDGETS_REFRESH_INTERVAL = 30000; // 30 seconds
 
   // Add this ref near the top with other state declarations
@@ -430,7 +430,7 @@ function App() {
     } catch (error) {
       console.error('Error loading tools:', error);
       handleApiError(error);
-      setError('Failed to load tools. Please try refreshing.');
+      // setError('Failed to load tools. Please try refreshing.');
       setAvailableTools([]); // Clear tools on error
     } finally {
       setIsToolsRefreshing(false);
@@ -440,26 +440,26 @@ function App() {
   // Replace the loadWidgets function with this optimized version
   const loadWidgets = async (forceRefresh = false) => {
     if (!tenantId) {
-      setError('Tenant ID is required to load Apps.');
+      // setError('Tenant ID is required to load Apps.');
       return;
     }
     
     // Check if Space ID is provided
     if (!spaceId?.trim()) {
-      setError('Space ID is required to load Apps.');
+      // setError('Space ID is required to load Apps.');
       return;
     }
     
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to load Apps.');
+      // setError('Authentication required to load Apps.');
       return;
     }
     
     // Check if token is valid, refresh if needed
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
-      setError('Authentication failed. Please log in again.');
+      // setError('Authentication failed. Please log in again.');
       return;
     }
 
@@ -472,7 +472,7 @@ function App() {
     
     try {
       setIsAppsRefreshing(true);
-      setError(null);
+      // setError(null);
       setConnectorsDataNull(false);
       
       console.log('Setting up widget to detect connector availability');
@@ -482,7 +482,7 @@ function App() {
     } catch (error) {
       console.error('Error loading apps:', error);
       handleApiError(error);
-      setError('Failed to load apps. Please try refreshing.');
+      // setError('Failed to load apps. Please try refreshing.');
     } finally {
       setIsAppsRefreshing(false);
     }
@@ -591,7 +591,7 @@ function App() {
   const handleSendMessage = async (message: string) => {
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to send messages.');
+      // setError('Authentication required to send messages.');
       setIsLoading(false);
       return;
     }
@@ -599,13 +599,13 @@ function App() {
     // Check if token is valid before sending
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
-      setError('Authentication failed. Please log in again.');
+      // setError('Authentication failed. Please log in again.');
       setIsLoading(false);
       return;
     }
     
     setIsLoading(true);
-    setError(null);
+    // setError(null);
     addMessage('user', message);
     setStreamingText('');
     
@@ -665,10 +665,10 @@ function App() {
           // If there's an action, set it
           if (response.action) {
             console.log('Action detected:', response.action);
-            setCurrentJson(response.action);
+            // setCurrentJson(response.action);
           } else {
             // Clear any previous action
-            setCurrentJson(null);
+            // setCurrentJson(null);
           }
           
           setIsLoading(false);
@@ -679,7 +679,7 @@ function App() {
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
-        setError(errorMessage);
+        // setError(errorMessage);
         
         // Update the temporary message to show the error
         setConversation(prev => ({
@@ -698,7 +698,7 @@ function App() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       handleApiError(error);
-      setError(errorMessage);
+      // setError(errorMessage);
       addMessage('assistant', `Error: ${errorMessage}`);
       setIsLoading(false);
     }
@@ -707,7 +707,7 @@ function App() {
   const handleExecuteTool = async (actionData: any) => {
     // Verify we have a valid authentication token
     if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to execute tools.');
+      // setError('Authentication required to execute tools.');
       setIsLoading(false);
       return;
     }
@@ -715,13 +715,13 @@ function App() {
     // Check if token is valid before executing
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
-      setError('Authentication failed. Please log in again.');
+      // setError('Authentication failed. Please log in again.');
       setIsLoading(false);
       return;
     }
     
     if (!actionData) {
-      setError("Invalid tool action data - no action data provided");
+      // setError("Invalid tool action data - no action data provided");
       return;
     }
     
@@ -739,7 +739,7 @@ function App() {
     const messageId = sourceMessage?.id || `exec-${Date.now()}`; // Use message ID or a temporary one
 
     setIsLoading(true);
-    setError(null);
+    // setError(null);
     try {
       // Update the existing message to show we're executing the tool
       // Instead of adding a new message, we'll just update the existing one
@@ -838,10 +838,10 @@ Result: ${JSON.stringify(response)}`,
           // If the AI suggests another action based on the tool result
           if (aiResponse.action) {
             console.log('Follow-up action detected:', aiResponse.action);
-            setCurrentJson(aiResponse.action);
+            // setCurrentJson(aiResponse.action);
           } else {
             // Clear any previous action
-            setCurrentJson(null);
+            // setCurrentJson(null);
           }
           
           setIsLoading(false);
@@ -852,7 +852,7 @@ Result: ${JSON.stringify(response)}`,
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
-        setError(errorMessage);
+        // setError(errorMessage);
         
         // Update the existing message to show the error
         setConversation(prev => ({
@@ -872,7 +872,7 @@ Result: ${JSON.stringify(response)}`,
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
       handleApiError(error);
-      setError(errorMessage);
+      // setError(errorMessage);
       
       // Update the existing message with the error
       setConversation(prev => ({
@@ -893,9 +893,9 @@ Result: ${JSON.stringify(response)}`,
 
   const clearConversation = () => {
     setConversation({ messages: [] });
-    setCurrentJson(null);
+    // setCurrentJson(null);
     setToolResults({});
-    setError(null);
+    // setError(null);
     localStorage.removeItem('conversation');
   };
 
@@ -904,9 +904,9 @@ Result: ${JSON.stringify(response)}`,
   };
 
   // Function to validate the current auth token
-  const validateAuthToken = async () => {
-    return await ensureValidToken();
-  };
+  // const validateAuthToken = async () => {
+  //   return await ensureValidToken();
+  // };
   
   // Function to check if Keycloak session is still valid
   const checkKeycloakSession = async () => {
@@ -1149,325 +1149,325 @@ Result: ${JSON.stringify(response)}`,
   }, [tenantId, spaceId, authStatus, authToken, sidebarView]);
 
   // Function to inspect widget iframe content
-  const inspectWidgetContent = () => {
-    try {
-      // Try to find the iframe element that FastnWidget likely uses
-      const iframes = document.querySelectorAll('iframe');
-      console.log('Found iframes:', iframes);
+  // const inspectWidgetContent = () => {
+  //   try {
+  //     // Try to find the iframe element that FastnWidget likely uses
+  //     const iframes = document.querySelectorAll('iframe');
+  //     console.log('Found iframes:', iframes);
       
-      // Find iframe related to the widget (usually has fastn in the src)
-      const widgetIframe = Array.from(iframes).find(iframe => 
-        iframe.src && iframe.src.includes('fastn')
-      );
+  //     // Find iframe related to the widget (usually has fastn in the src)
+  //     const widgetIframe = Array.from(iframes).find(iframe => 
+  //       iframe.src && iframe.src.includes('fastn')
+  //     );
       
-      if (widgetIframe) {
-        console.log('Widget iframe found:', widgetIframe);
+  //     if (widgetIframe) {
+  //       console.log('Widget iframe found:', widgetIframe);
         
-        try {
-          // Try to access the iframe's document (may throw security error due to same-origin policy)
-          const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
-          console.log('Widget iframe document:', iframeDocument);
+  //       try {
+  //         // Try to access the iframe's document (may throw security error due to same-origin policy)
+  //         const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
+  //         console.log('Widget iframe document:', iframeDocument);
           
-          // Store response to show in UI
-          setWidgetResponses(prev => [
-            ...prev, 
-            { 
-              timestamp: new Date().toISOString(),
-              data: { 
-                type: 'iframe_inspection',
-                success: true,
-                message: 'Iframe content inspected. See console for details.'
-              } 
-            }
-          ]);
-        } catch (securityError) {
-          console.error('Security error accessing iframe content:', securityError);
-          setWidgetResponses(prev => [
-            ...prev, 
-            { 
-              timestamp: new Date().toISOString(),
-              data: { 
-                type: 'iframe_inspection_error',
-                success: false,
-                message: 'Security error accessing iframe content. Widget likely uses a different origin.'
-              } 
-            }
-          ]);
-        }
-      } else {
-        console.log('Widget iframe not found');
-        setWidgetResponses(prev => [
-          ...prev, 
-          { 
-            timestamp: new Date().toISOString(),
-            data: { 
-              type: 'iframe_not_found',
-              success: false,
-              message: 'Could not find FastnWidget iframe'
-            } 
-          }
-        ]);
-      }
-    } catch (error) {
-      console.error('Error inspecting widget content:', error);
-      setWidgetResponses(prev => [
-        ...prev, 
-        { 
-          timestamp: new Date().toISOString(),
-          data: { 
-            type: 'inspection_error',
-            success: false,
-            error: String(error)
-          } 
-        }
-      ]);
-    }
-  };
+  //         // Store response to show in UI
+  //         setWidgetResponses(prev => [
+  //           ...prev, 
+  //           { 
+  //             timestamp: new Date().toISOString(),
+  //             data: { 
+  //               type: 'iframe_inspection',
+  //               success: true,
+  //               message: 'Iframe content inspected. See console for details.'
+  //             } 
+  //           }
+  //         ]);
+  //       } catch (securityError) {
+  //         console.error('Security error accessing iframe content:', securityError);
+  //         setWidgetResponses(prev => [
+  //           ...prev, 
+  //           { 
+  //             timestamp: new Date().toISOString(),
+  //             data: { 
+  //               type: 'iframe_inspection_error',
+  //               success: false,
+  //               message: 'Security error accessing iframe content. Widget likely uses a different origin.'
+  //             } 
+  //           }
+  //         ]);
+  //       }
+  //     } else {
+  //       console.log('Widget iframe not found');
+  //       setWidgetResponses(prev => [
+  //         ...prev, 
+  //         { 
+  //           timestamp: new Date().toISOString(),
+  //           data: { 
+  //             type: 'iframe_not_found',
+  //             success: false,
+  //             message: 'Could not find FastnWidget iframe'
+  //           } 
+  //         }
+  //       ]);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error inspecting widget content:', error);
+  //     setWidgetResponses(prev => [
+  //       ...prev, 
+  //       { 
+  //         timestamp: new Date().toISOString(),
+  //         data: { 
+  //           type: 'inspection_error',
+  //           success: false,
+  //           error: String(error)
+  //         } 
+  //       }
+  //     ]);
+  //   }
+  // };
 
   // Function to monitor widget iframe console outputs
-  const monitorWidgetConsole = () => {
-    try {
-      // Try to find the iframe element that FastnWidget likely uses
-      const iframes = document.querySelectorAll('iframe');
-      const widgetIframe = Array.from(iframes).find(iframe => 
-        iframe.src && iframe.src.includes('fastn')
-      );
+  // const monitorWidgetConsole = () => {
+  //   try {
+  //     // Try to find the iframe element that FastnWidget likely uses
+  //     const iframes = document.querySelectorAll('iframe');
+  //     const widgetIframe = Array.from(iframes).find(iframe => 
+  //       iframe.src && iframe.src.includes('fastn')
+  //     );
       
-      if (widgetIframe && widgetIframe.contentWindow) {
-        console.log('Attempting to monitor widget console output');
+  //     if (widgetIframe && widgetIframe.contentWindow) {
+  //       console.log('Attempting to monitor widget console output');
         
-        try {
-          // Try to inject script to override console methods
-          // Note: This might not work due to security restrictions
-          const script = document.createElement('script');
-          script.textContent = `
-            // Store original console methods
-            const originalConsole = {
-              log: console.log,
-              error: console.error,
-              warn: console.warn,
-              info: console.info
-            };
+  //       try {
+  //         // Try to inject script to override console methods
+  //         // Note: This might not work due to security restrictions
+  //         const script = document.createElement('script');
+  //         script.textContent = `
+  //           // Store original console methods
+  //           const originalConsole = {
+  //             log: console.log,
+  //             error: console.error,
+  //             warn: console.warn,
+  //             info: console.info
+  //           };
             
-            // Override console methods to send messages to parent
-            console.log = function() {
-              // Call original method
-              originalConsole.log.apply(console, arguments);
-              // Send to parent
-              window.parent.postMessage({
-                type: 'widget_console',
-                method: 'log',
-                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
-              }, '*');
-            };
+  //           // Override console methods to send messages to parent
+  //           console.log = function() {
+  //             // Call original method
+  //             originalConsole.log.apply(console, arguments);
+  //             // Send to parent
+  //             window.parent.postMessage({
+  //               type: 'widget_console',
+  //               method: 'log',
+  //               args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+  //             }, '*');
+  //           };
             
-            console.error = function() {
-              originalConsole.error.apply(console, arguments);
-              window.parent.postMessage({
-                type: 'widget_console',
-                method: 'error',
-                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
-              }, '*');
-            };
+  //           console.error = function() {
+  //             originalConsole.error.apply(console, arguments);
+  //             window.parent.postMessage({
+  //               type: 'widget_console',
+  //               method: 'error',
+  //               args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+  //             }, '*');
+  //           };
             
-            console.warn = function() {
-              originalConsole.warn.apply(console, arguments);
-              window.parent.postMessage({
-                type: 'widget_console',
-                method: 'warn',
-                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
-              }, '*');
-            };
+  //           console.warn = function() {
+  //             originalConsole.warn.apply(console, arguments);
+  //             window.parent.postMessage({
+  //               type: 'widget_console',
+  //               method: 'warn',
+  //               args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+  //             }, '*');
+  //           };
             
-            console.info = function() {
-              originalConsole.info.apply(console, arguments);
-              window.parent.postMessage({
-                type: 'widget_console',
-                method: 'info',
-                args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
-              }, '*');
-            };
+  //           console.info = function() {
+  //             originalConsole.info.apply(console, arguments);
+  //             window.parent.postMessage({
+  //               type: 'widget_console',
+  //               method: 'info',
+  //               args: Array.from(arguments).map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg)
+  //             }, '*');
+  //           };
             
-            window.parent.postMessage({
-              type: 'widget_console',
-              method: 'info',
-              args: ['Console monitoring initialized']
-            }, '*');
-          `;
+  //           window.parent.postMessage({
+  //             type: 'widget_console',
+  //             method: 'info',
+  //             args: ['Console monitoring initialized']
+  //           }, '*');
+  //         `;
           
-          try {
-            widgetIframe.contentDocument?.head.appendChild(script);
-            setWidgetResponses(prev => [
-              ...prev, 
-              { 
-                timestamp: new Date().toISOString(),
-                data: { 
-                  type: 'console_monitor_setup',
-                  success: true,
-                  message: 'Console monitoring script injected. Widget console outputs will appear here.'
-                } 
-              }
-            ]);
-          } catch (injectError) {
-            console.error('Error injecting console monitor script:', injectError);
-            setWidgetResponses(prev => [
-              ...prev, 
-              { 
-                timestamp: new Date().toISOString(),
-                data: { 
-                  type: 'console_monitor_error',
-                  success: false,
-                  message: 'Could not inject console monitoring script due to security restrictions.',
-                  error: String(injectError)
-                } 
-              }
-            ]);
-          }
-        } catch (securityError) {
-          console.error('Security error accessing iframe for console monitoring:', securityError);
-          setWidgetResponses(prev => [
-            ...prev, 
-            { 
-              timestamp: new Date().toISOString(),
-              data: { 
-                type: 'console_monitor_security_error',
-                success: false,
-                message: 'Security error accessing iframe for console monitoring.',
-                error: String(securityError)
-              } 
-            }
-          ]);
-        }
-      } else {
-        console.log('Widget iframe not found for console monitoring');
-        setWidgetResponses(prev => [
-          ...prev, 
-          { 
-            timestamp: new Date().toISOString(),
-            data: { 
-              type: 'iframe_not_found',
-              success: false,
-              message: 'Could not find FastnWidget iframe for console monitoring'
-            } 
-          }
-        ]);
-      }
-    } catch (error) {
-      console.error('Error setting up console monitoring:', error);
-      setWidgetResponses(prev => [
-        ...prev, 
-        { 
-          timestamp: new Date().toISOString(),
-          data: { 
-            type: 'console_monitor_setup_error',
-            success: false,
-            error: String(error)
-          } 
-        }
-      ]);
-    }
-  };
+  //         try {
+  //           widgetIframe.contentDocument?.head.appendChild(script);
+  //           setWidgetResponses(prev => [
+  //             ...prev, 
+  //             { 
+  //               timestamp: new Date().toISOString(),
+  //               data: { 
+  //                 type: 'console_monitor_setup',
+  //                 success: true,
+  //                 message: 'Console monitoring script injected. Widget console outputs will appear here.'
+  //               } 
+  //             }
+  //           ]);
+  //         } catch (injectError) {
+  //           console.error('Error injecting console monitor script:', injectError);
+  //           setWidgetResponses(prev => [
+  //             ...prev, 
+  //             { 
+  //               timestamp: new Date().toISOString(),
+  //               data: { 
+  //                 type: 'console_monitor_error',
+  //                 success: false,
+  //                 message: 'Could not inject console monitoring script due to security restrictions.',
+  //                 error: String(injectError)
+  //               } 
+  //             }
+  //           ]);
+  //         }
+  //       } catch (securityError) {
+  //         console.error('Security error accessing iframe for console monitoring:', securityError);
+  //         setWidgetResponses(prev => [
+  //           ...prev, 
+  //           { 
+  //             timestamp: new Date().toISOString(),
+  //             data: { 
+  //               type: 'console_monitor_security_error',
+  //               success: false,
+  //               message: 'Security error accessing iframe for console monitoring.',
+  //               error: String(securityError)
+  //             } 
+  //           }
+  //         ]);
+  //       }
+  //     } else {
+  //       console.log('Widget iframe not found for console monitoring');
+  //       setWidgetResponses(prev => [
+  //         ...prev, 
+  //         { 
+  //           timestamp: new Date().toISOString(),
+  //           data: { 
+  //             type: 'iframe_not_found',
+  //             success: false,
+  //             message: 'Could not find FastnWidget iframe for console monitoring'
+  //           } 
+  //         }
+  //       ]);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error setting up console monitoring:', error);
+  //     setWidgetResponses(prev => [
+  //       ...prev, 
+  //       { 
+  //         timestamp: new Date().toISOString(),
+  //         data: { 
+  //           type: 'console_monitor_setup_error',
+  //           success: false,
+  //           error: String(error)
+  //         } 
+  //       }
+  //     ]);
+  //   }
+  // };
 
   // Function to trigger widget API communication
-  const testWidgetAPI = () => {
-    try {
-      // Record that we're triggering the test
-      setWidgetResponses(prev => [
-        ...prev, 
-        { 
-          timestamp: new Date().toISOString(),
-          data: { 
-            type: 'api_test_trigger',
-            message: 'Attempting to trigger widget API communication. Check console for messages.'
-          } 
-        }
-      ]);
+  // const testWidgetAPI = () => {
+  //   try {
+  //     // Record that we're triggering the test
+  //     setWidgetResponses(prev => [
+  //       ...prev, 
+  //       { 
+  //         timestamp: new Date().toISOString(),
+  //         data: { 
+  //           type: 'api_test_trigger',
+  //           message: 'Attempting to trigger widget API communication. Check console for messages.'
+  //         } 
+  //       }
+  //     ]);
       
-      // Try to find the iframe element that FastnWidget likely uses
-      const iframes = document.querySelectorAll('iframe');
-      const widgetIframe = Array.from(iframes).find(iframe => 
-        iframe.src && iframe.src.includes('fastn')
-      );
+  //     // Try to find the iframe element that FastnWidget likely uses
+  //     const iframes = document.querySelectorAll('iframe');
+  //     const widgetIframe = Array.from(iframes).find(iframe => 
+  //       iframe.src && iframe.src.includes('fastn')
+  //     );
       
-      if (widgetIframe && widgetIframe.contentWindow) {
-        console.log('Found widget iframe for API test:', widgetIframe);
+  //     if (widgetIframe && widgetIframe.contentWindow) {
+  //       console.log('Found widget iframe for API test:', widgetIframe);
         
-        // Send a message to the widget iframe to trigger API communication
-        widgetIframe.contentWindow.postMessage({
-          type: 'widget_api_test',
-          command: 'fetch_data',
-          timestamp: Date.now()
-        }, '*');
+  //       // Send a message to the widget iframe to trigger API communication
+  //       widgetIframe.contentWindow.postMessage({
+  //         type: 'widget_api_test',
+  //         command: 'fetch_data',
+  //         timestamp: Date.now()
+  //       }, '*');
         
-        // Try to access iframe content to trigger more actions
-        try {
-          // This may fail due to cross-origin restrictions
-          const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
+  //       // Try to access iframe content to trigger more actions
+  //       try {
+  //         // This may fail due to cross-origin restrictions
+  //         const iframeDocument = widgetIframe.contentDocument || widgetIframe.contentWindow?.document;
           
-          if (iframeDocument) {
-            // Try to find buttons or links that might trigger API calls
-            const buttons = iframeDocument.querySelectorAll('button');
-            const links = iframeDocument.querySelectorAll('a');
+  //         if (iframeDocument) {
+  //           // Try to find buttons or links that might trigger API calls
+  //           const buttons = iframeDocument.querySelectorAll('button');
+  //           const links = iframeDocument.querySelectorAll('a');
             
-            console.log('Found widget buttons:', buttons);
-            console.log('Found widget links:', links);
+  //           console.log('Found widget buttons:', buttons);
+  //           console.log('Found widget links:', links);
             
-            // Try to click the first button to trigger action
-            if (buttons.length > 0) {
-              console.log('Attempting to click first button');
-              buttons[0].click();
-            }
+  //           // Try to click the first button to trigger action
+  //           if (buttons.length > 0) {
+  //             console.log('Attempting to click first button');
+  //             buttons[0].click();
+  //           }
             
-            // Try to trigger iframe reload which might cause API calls
-            widgetIframe.contentWindow.location.reload();
-          }
-        } catch (securityError) {
-          console.error('Security error accessing iframe content for API test:', securityError);
-        }
-      } else {
-        console.log('Widget iframe not found for API test');
-        setWidgetResponses(prev => [
-          ...prev, 
-          { 
-            timestamp: new Date().toISOString(),
-            data: { 
-              type: 'iframe_not_found',
-              success: false,
-              message: 'Could not find FastnWidget iframe for API test'
-            } 
-          }
-        ]);
-      }
-    } catch (error) {
-      console.error('Error during widget API test:', error);
-      setWidgetResponses(prev => [
-        ...prev, 
-        { 
-          timestamp: new Date().toISOString(),
-          data: { 
-            type: 'api_test_error',
-            success: false,
-            error: String(error)
-          } 
-        }
-      ]);
-    }
-  };
+  //           // Try to trigger iframe reload which might cause API calls
+  //           widgetIframe.contentWindow.location.reload();
+  //         }
+  //       } catch (securityError) {
+  //         console.error('Security error accessing iframe content for API test:', securityError);
+  //       }
+  //     } else {
+  //       console.log('Widget iframe not found for API test');
+  //       setWidgetResponses(prev => [
+  //         ...prev, 
+  //         { 
+  //           timestamp: new Date().toISOString(),
+  //           data: { 
+  //             type: 'iframe_not_found',
+  //             success: false,
+  //             message: 'Could not find FastnWidget iframe for API test'
+  //           } 
+  //         }
+  //       ]);
+  //     }
+  //   } catch (error) {
+  //     console.error('Error during widget API test:', error);
+  //     setWidgetResponses(prev => [
+  //       ...prev, 
+  //       { 
+  //         timestamp: new Date().toISOString(),
+  //         data: { 
+  //           type: 'api_test_error',
+  //           success: false,
+  //           error: String(error)
+  //         } 
+  //       }
+  //     ]);
+  //   }
+  // };
 
   // Function to simulate null connectors data
-  const simulateNullConnectors = () => {
-    setConnectorsDataNull(true); // Set to true (no connectors)
-    setWidgetResponses(prev => [
-      ...prev, 
-      { 
-        timestamp: new Date().toISOString(),
-        data: { 
-          type: 'SIMULATED_NULL_CONNECTORS',
-          message: 'Simulated null connectors data. Widget display should update to show "No apps available".'
-        } 
-      }
-    ]);
-  };
+  // const simulateNullConnectors = () => {
+  //   setConnectorsDataNull(true); // Set to true (no connectors)
+  //   setWidgetResponses(prev => [
+  //     ...prev, 
+  //     { 
+  //       timestamp: new Date().toISOString(),
+  //       data: { 
+  //         type: 'SIMULATED_NULL_CONNECTORS',
+  //         message: 'Simulated null connectors data. Widget display should update to show "No apps available".'
+  //       } 
+  //     }
+  //   ]);
+  // };
 
   // Effect to check for empty connectors data when viewing the apps tab
   useEffect(() => {
