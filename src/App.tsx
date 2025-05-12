@@ -457,11 +457,11 @@ function App() {
     }
     
     // Check if token is valid, refresh if needed
-    const isTokenValid = await ensureValidToken();
-    if (!isTokenValid) {
-      // setError('Authentication failed. Please log in again.');
-      return;
-    }
+    // const isTokenValid = await ensureValidToken();
+    // if (!isTokenValid) {
+    //   // setError('Authentication failed. Please log in again.');
+    //   return;
+    // }
 
     // Check if we need to refresh based on time
     const now = Date.now();
