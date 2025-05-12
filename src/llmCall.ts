@@ -195,7 +195,7 @@ function convertToolsGeminiFormat(tools: any[]) {
 }
 
 // Function to call the backend API and get response
-const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, spaceId?: string) => {
+const callBackendAPI = async (messages: any[], tools: any[], modelName?: string, spaceId?: string, apiKey?: string) => {
   // Get the auth token from localStorage
   const authToken = localStorage.getItem('fastnAuthToken') || '';
   
@@ -234,6 +234,11 @@ const callBackendAPI = async (messages: any[], tools: any[], modelName?: string,
   if (modelName) {
     // For the API, set the model directly in the root of input
     requestBody.input.model = modelName;
+    
+    // Add API key if provided
+    if (apiKey) {
+      requestBody.input.api_key = apiKey;
+    }
     
     // Check for Anthropic models
     if (modelName.includes('claude')) {
@@ -283,7 +288,8 @@ export const getStreamingAIResponse = async (
   onChunk: (text: string) => void,
   onComplete: (response: AIResponse) => void,
   modelName?: string,
-  spaceId?: string 
+  spaceId?: string,
+  apiKey?: string
 ) => {
   try {
     // Format previous messages for the backend
@@ -296,8 +302,8 @@ export const getStreamingAIResponse = async (
       { role: 'user' as const, content: message }
     ];
 
-    // Call the backend API - pass spaceId
-    const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
+    // Call the backend API - pass spaceId and apiKey
+    const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId, apiKey);
 
     // Handle different response formats based on model type
     let responseText = '';
@@ -405,7 +411,8 @@ export const getToolExecutionResponse = async (
   onChunk?: (text: string) => void,
   onComplete?: (response: AIResponse) => void,
   modelName?: string,
-  spaceId?: string
+  spaceId?: string,
+  apiKey?: string
 ): Promise<AIResponse> => {
   try {
     // Format previous messages for the backend
@@ -453,8 +460,8 @@ export const getToolExecutionResponse = async (
     // Log conversation for debugging
     console.log('Sending conversation to LLM:', JSON.stringify(messages, null, 2));
 
-   // Call the backend API - pass spaceId
-   const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId);
+   // Call the backend API - pass spaceId and apiKey
+   const backendResponse = await callBackendAPI(messages, availableTools, modelName, spaceId, apiKey);
 
     // Handle error response
     if (!backendResponse || backendResponse.error) {

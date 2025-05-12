@@ -143,33 +143,153 @@ api.interceptors.response.use(
   }
 );
 
+// Request deduplication cache
+interface CacheEntry {
+  timestamp: number;
+  response: any;
+}
+
+// Cache for 30 seconds
+const REQUEST_CACHE_TTL = 30000;
+const requestCache = new Map<string, CacheEntry>();
+
+// Create a hash key for each request
+const createCacheKey = (url: string, data: any): string => {
+  return `${url}:${JSON.stringify(data)}`;
+};
+
+// Add request interceptor to axios/api
+api.interceptors.request.use(
+  (config) => {
+    // Only apply caching to GET and POST requests
+    if (!config.method || !['get', 'post'].includes(config.method.toLowerCase())) {
+      return config;
+    }
+
+    const url = config.url || '';
+    
+    // Skip caching for non-API endpoints or specifically excluded endpoints
+    if (!url.includes('/api/') || url.includes('/auth/')) {
+      return config;
+    }
+
+    // Create a cache key from URL and request data
+    const cacheKey = createCacheKey(url, config.data);
+    
+    // Check if we have a cached response
+    const cachedEntry = requestCache.get(cacheKey);
+    if (cachedEntry) {
+      const now = Date.now();
+      // If the cache is still fresh
+      if (now - cachedEntry.timestamp < REQUEST_CACHE_TTL) {
+        console.log(`🔄 CACHE HIT for ${url}`);
+        
+        // Create a custom adapter that returns the cached response
+        config.adapter = () => {
+          return Promise.resolve({
+            data: cachedEntry.response,
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            config,
+            request: {}
+          });
+        };
+      } else {
+        // Cache expired, remove it
+        requestCache.delete(cacheKey);
+      }
+    } else {
+      console.log(`🔄 CACHE MISS for ${url}`);
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Add response interceptor to cache responses
+api.interceptors.response.use(
+  (response) => {
+    // Only cache successful responses
+    if (response.status === 200 || response.status === 201) {
+      const url = response.config.url || '';
+      
+      // Skip caching for non-API endpoints or specifically excluded endpoints
+      if (!url.includes('/api/') || url.includes('/auth/')) {
+        return response;
+      }
+
+      // Store in cache
+      const cacheKey = createCacheKey(url, response.config.data);
+      requestCache.set(cacheKey, {
+        timestamp: Date.now(),
+        response: response.data
+      });
+      console.log(`📦 Cached response for ${url}`);
+    }
+    return response;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Add this at the top of the file after imports
+// Global flag to prevent duplicate getTools calls with same parameters
+const getToolsCalls = new Map<string, Promise<any>>();
+
 export const getTools = async (useCase: string, spaceId: string, authToken: string, tenantId?: string): Promise<Tool[]> => {
   if (!spaceId) {
     console.warn('Space ID is missing. Cannot fetch tools.');
     return [];
   }
-  try {
-    const response = await api.post('/api/ucl/getTools', {
-      input: {
-        useCase,
-        spaceId: spaceId,
-      },
-    }, {
-      headers: {
-        'x-fastn-space-id': spaceId,
-        'x-fastn-space-tenantid': tenantId || '',
-        'x-fastn-custom-auth': 'true',
-        'authorization': `Bearer ${authToken}`
-      }
-    });
-    return response.data || [];
-  } catch (error) {
-    console.error('Error fetching tools:', error);
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      throw new Error('Invalid API Key or Space ID. Please check your credentials.');
-    }
-    throw error;
+
+  // Create a unique key for this request
+  const requestKey = `${useCase}:${spaceId}:${tenantId || ''}`;
+  
+  // Check if this exact call is already in progress
+  if (getToolsCalls.has(requestKey)) {
+    console.log(`🛑 DEDUPLICATED getTools call for ${requestKey}`);
+    return getToolsCalls.get(requestKey)!;
   }
+  
+  // Create the promise for this request
+  const toolsPromise = (async () => {
+    try {
+      console.log(`🔄 Making getTools call for ${requestKey}`);
+      const response = await api.post('/api/ucl/getTools', {
+        input: {
+          // useCase,
+          // spaceId: spaceId,
+        },
+      }, {
+        headers: {
+          'x-fastn-space-id': spaceId,
+          'x-fastn-space-tenantid': tenantId || '',
+          'x-fastn-custom-auth': 'true',
+          'authorization': `Bearer ${authToken}`
+        }
+      });
+      return response.data || [];
+    } catch (error) {
+      console.error('Error fetching tools:', error);
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        throw new Error('Invalid API Key or Space ID. Please check your credentials.');
+      }
+      throw error;
+    } finally {
+      // Clear the promise from the map after it resolves or rejects
+      // Use a slight delay to allow multiple simultaneous calls to be deduplicated
+      setTimeout(() => {
+        getToolsCalls.delete(requestKey);
+      }, 100);
+    }
+  })();
+  
+  // Store the promise in the map
+  getToolsCalls.set(requestKey, toolsPromise);
+  
+  // Return the promise
+  return toolsPromise;
 };
 
 const inferActionId = (parameters: any, tools: Tool[]): string | null => {
