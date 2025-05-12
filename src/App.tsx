@@ -20,6 +20,10 @@ interface ExtendedUser extends OidcUser {
   refresh_token: string;
 }
 
+// Add these at the very top of the file, outside the App component
+let hasLoadedToolsGlobal = false;
+let hasCheckedSessionGlobal = false;
+
 function App() {
   const [conversation, setConversation] = useState<Conversation>(() => {
     const saved = localStorage.getItem('conversation');
@@ -171,6 +175,19 @@ function App() {
 
   // Add state for password
   const [showPassword, setShowPassword] = useState(false);
+
+  // Add these state variables near the top with other state declarations
+  const [lastToolsLoadTime, setLastToolsLoadTime] = useState<number>(0);
+  const [lastWidgetsLoadTime, setLastWidgetsLoadTime] = useState<number>(0);
+  const TOOLS_REFRESH_INTERVAL = 30000; // 30 seconds
+  const WIDGETS_REFRESH_INTERVAL = 30000; // 30 seconds
+
+  // Add this ref near the top with other state declarations
+  const lastToolsParams = useRef<{spaceId: string, tenantId: string} | null>(null);
+
+  // Add these state variables near the top with other state declarations
+  const [lastSessionCheckTime, setLastSessionCheckTime] = useState<number>(0);
+  const SESSION_CHECK_INTERVAL = 300000; // 5 minutes in milliseconds
 
   // Effect to automatically redirect to Keycloak when not authenticated
   useEffect(() => {
@@ -389,71 +406,27 @@ function App() {
   // Add debounced functions for loading tools and widgets after typing
   const [debouncedLoadExecutor, setDebouncedLoadExecutor] = useState<NodeJS.Timeout | null>(null);
 
-  // Effect to load tools and widgets after user finishes typing and unfocuses
-  useEffect(() => {
-    // Clear any existing timeout
-    if (debouncedLoadExecutor) {
-      clearTimeout(debouncedLoadExecutor);
-    }
-    
-    // Only proceed if neither field is focused
-    const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused;
-    
-    // If both values are provided and user is authenticated, set a new timeout
-    if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
-      const timeoutId = setTimeout(() => {
-        loadTools();
-        // loadWidgets(); // Don't auto-load widgets
-        // Navigate to apps tab if both Space ID and Tenant ID are provided
-        setSidebarView('apps');
-      }, 500); // 500ms debounce
-      
-      setDebouncedLoadExecutor(timeoutId);
-    } else if (authStatus === 'success' && authToken && spaceId?.trim() && !isAnyFieldFocused) {
-      // If only Space ID is provided, just load tools
-      const timeoutId = setTimeout(() => {
-        loadTools();
-      }, 500); // 500ms debounce
-      
-      setDebouncedLoadExecutor(timeoutId);
-    }
-    
-    // Cleanup function to clear the timeout when component unmounts or dependencies change
-    return () => {
-      if (debouncedLoadExecutor) {
-        clearTimeout(debouncedLoadExecutor);
-      }
-    };
-  }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused]);
+  // Modify the loadTools function to prevent double-calls
+  const loadTools = async (forceRefresh = false) => {
+    // Skip if no auth or spaceId
+    if (authStatus !== 'success' || !authToken) return;
+    if (!spaceId?.trim()) return;
 
-  const loadTools = async () => {
-    // Verify we have a valid authentication token
-    if (authStatus !== 'success' || !authToken) {
-      setError('Authentication required to load tools.');
+    // Only fetch if params changed or forceRefresh
+    if (
+      !forceRefresh &&
+      lastToolsParams.current &&
+      lastToolsParams.current.spaceId === spaceId &&
+      lastToolsParams.current.tenantId === tenantId
+    ) {
       return;
     }
-    console.log('Loading tools');
-    // Check if token is valid, refresh if needed
-    const isTokenValid = await ensureValidToken();
-    if (!isTokenValid) {
-      setError('Authentication failed. Please log in again.');
-      return;
-    }
-    
-    // Check if Space ID is provided
-    if (!spaceId?.trim()) {
-      setError('Space ID is required to load tools.');
-      return;
-    }
-    
+
+    setIsToolsRefreshing(true); // Put this back to show loading state
     try {
-      setIsToolsRefreshing(true);
-      setError(null);
-      // Pass apiKey and spaceId to getTools
-
       const tools = await getTools('chat', spaceId, authToken, tenantId);
-
       setAvailableTools(tools);
+      lastToolsParams.current = { spaceId, tenantId };
     } catch (error) {
       console.error('Error loading tools:', error);
       handleApiError(error);
@@ -464,7 +437,8 @@ function App() {
     }
   };
 
-  const loadWidgets = async () => {
+  // Replace the loadWidgets function with this optimized version
+  const loadWidgets = async (forceRefresh = false) => {
     if (!tenantId) {
       setError('Tenant ID is required to load Apps.');
       return;
@@ -488,23 +462,22 @@ function App() {
       setError('Authentication failed. Please log in again.');
       return;
     }
+
+    // Check if we need to refresh based on time
+    const now = Date.now();
+    if (!forceRefresh && now - lastWidgetsLoadTime < WIDGETS_REFRESH_INTERVAL) {
+      console.log('Skipping widgets refresh - too soon since last load');
+      return;
+    }
     
     try {
       setIsAppsRefreshing(true);
       setError(null);
-      // Reset connectors data status when reloading
       setConnectorsDataNull(false);
       
-      // Instead of making an API call to check connectors, we'll mount the widget
-      // and rely on the message event listener to determine if connectors are available
       console.log('Setting up widget to detect connector availability');
-      
-      // Force remount of the FastnWidget component
       setWidgetMounted(false);
-      // setTimeout(() => {
-      //   setWidgetKey(prevKey => prevKey + 1);
-      //   setWidgetMounted(true);
-      // }, 3000); // Check after 3 seconds
+      setLastWidgetsLoadTime(now);
       
     } catch (error) {
       console.error('Error loading apps:', error);
@@ -515,9 +488,75 @@ function App() {
     }
   };
 
+  // Only check session ONCE on mount (per reload)
   useEffect(() => {
-    loadTools();
-  }, []);
+    if (!hasCheckedSessionGlobal && authToken && authStatus === 'success') {
+      // Remove console.log to reduce noise
+      checkKeycloakSession();
+      hasCheckedSessionGlobal = true;
+    }
+  }, [authToken, authStatus]);
+
+  // Limit useEffect for tools to essential changes only
+  useEffect(() => {
+    if (!hasLoadedToolsGlobal && authStatus === 'success' && authToken && spaceId?.trim()) {
+      // Remove console.log to reduce noise
+      hasLoadedToolsGlobal = true;
+      loadTools();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus, authToken, spaceId]); // Remove tenantId dependency if not essential
+
+  // Skip this effect if we're still loading
+  // This prevents calls during early renders
+  useEffect(() => {
+    if (auth.isLoading) return;
+    
+    // Only run once on first successful auth
+    if (hasCheckedSessionGlobal) return;
+    
+    if (authToken && authStatus === 'success') {
+      // Remove console.log to reduce noise
+      hasCheckedSessionGlobal = true;
+      checkKeycloakSession();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, authStatus, auth.isLoading]);
+
+  // Replace the useEffect for tools/widgets loading after typing
+  useEffect(() => {
+    // Clear any existing timeout
+    if (debouncedLoadExecutor) {
+      clearTimeout(debouncedLoadExecutor);
+    }
+    
+    // Only proceed if neither field is focused
+    const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused;
+    
+    // If both values are provided and user is authenticated, set a new timeout
+    if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
+      const timeoutId = setTimeout(() => {
+        loadTools(true); // Force refresh when values change
+        setSidebarView('apps');
+      }, 500); // 500ms debounce
+      
+      setDebouncedLoadExecutor(timeoutId);
+    } else if (authStatus === 'success' && authToken && spaceId?.trim() && !isAnyFieldFocused) {
+      // If only Space ID is provided, just load tools
+      const timeoutId = setTimeout(() => {
+        loadTools(true); // Force refresh when values change
+      }, 500); // 500ms debounce
+      
+      setDebouncedLoadExecutor(timeoutId);
+    }
+    
+    // Cleanup function to clear the timeout when component unmounts or dependencies change
+    return () => {
+      if (debouncedLoadExecutor) {
+        clearTimeout(debouncedLoadExecutor);
+      }
+    };
+  }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused]);
 
   // Helper function to create a modified conversation history that includes tool execution results
   const prepareContextForLLM = (messages: Message[]) => {
@@ -557,7 +596,7 @@ function App() {
       return;
     }
     
-    // Check if token is valid, refresh if needed
+    // Check if token is valid before sending
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
       setError('Authentication failed. Please log in again.');
@@ -673,7 +712,7 @@ function App() {
       return;
     }
     
-    // Check if token is valid, refresh if needed
+    // Check if token is valid before executing
     const isTokenValid = await ensureValidToken();
     if (!isTokenValid) {
       setError('Authentication failed. Please log in again.');
@@ -873,6 +912,13 @@ Result: ${JSON.stringify(response)}`,
   const checkKeycloakSession = async () => {
     if (!authToken) return false;
     
+    const now = Date.now();
+    
+    // Only check once every 5 minutes unless forced
+    if (now - lastSessionCheckTime < SESSION_CHECK_INTERVAL) {
+      return true; // Assume session is still valid if checked recently
+    }
+    
     try {
       // Call Keycloak's userinfo endpoint to verify the token is still valid
       const response = await fetch('https://live.fastn.ai/auth/realms/fastn/protocol/openid-connect/userinfo', {
@@ -881,6 +927,9 @@ Result: ${JSON.stringify(response)}`,
           'Authorization': `Bearer ${authToken}`
         }
       });
+      
+      // Update the last check time
+      setLastSessionCheckTime(now);
       
       if (!response.ok) {
         console.log('Keycloak session is no longer valid, logging out');
@@ -1009,16 +1058,10 @@ Result: ${JSON.stringify(response)}`,
       return false;
     }
     
-    // First check if Keycloak session is still valid
-    const isSessionValid = await checkKeycloakSession();
-    if (!isSessionValid) {
-      return false;
-    }
-    
     const now = Date.now();
     const timeUntilExpiry = tokenExpiryTime - now;
     
-    // If token is valid and not about to expire, return true
+    // If token is valid and not about to expire, return true without checking session
     if (tokenExpiryTime > 0 && timeUntilExpiry > 0) {
       // If token will expire in less than 4 minutes (240000 ms), proactively refresh it
       if (timeUntilExpiry < 240000) {
@@ -1026,6 +1069,14 @@ Result: ${JSON.stringify(response)}`,
         return await refreshAccessToken();
       }
       return true;
+    }
+    
+    // Only check Keycloak session if token appears expired
+    if (timeUntilExpiry <= 0) {
+      const isSessionValid = await checkKeycloakSession();
+      if (!isSessionValid) {
+        return false;
+      }
     }
     
     // Token is expired, try to refresh
@@ -1653,32 +1704,20 @@ Result: ${JSON.stringify(response)}`,
 
   // Verify token on initial load and when dependencies change
   useEffect(() => {
+    // Skip this effect if we're still loading
+    // This prevents calls during early renders
+    if (auth.isLoading) return;
+    
+    // Only run once on first successful auth
+    if (hasCheckedSessionGlobal) return;
+    
     if (authToken && authStatus === 'success') {
-      validateAuthToken().catch(handleApiError);
+      console.log('Initial validation of auth token');
+      hasCheckedSessionGlobal = true; // Prevent further calls
+      checkKeycloakSession();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Check token validity periodically to detect external logouts
-  useEffect(() => {
-    if (authStatus === 'success' && authToken) {
-      console.log('Setting up token validity check interval');
-      const interval = setInterval(async () => {
-        // Check if Keycloak session is still valid
-        console.log('Checking token validity and Keycloak session...');
-        const isValid = await checkKeycloakSession();
-        if (!isValid) {
-          console.log('Keycloak session is no longer valid (detected in interval)');
-          // The checkKeycloakSession function already calls handleLogout if needed
-        }
-      }, 60000); // Check every minute
-      
-      return () => {
-        console.log('Clearing token validity check interval');
-        clearInterval(interval);
-      };
-    }
-  }, [authStatus, authToken]);
+  }, [authToken, authStatus, auth.isLoading]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
@@ -1803,7 +1842,7 @@ Result: ${JSON.stringify(response)}`,
                     
                     // Call loadTools when switching to tools tab
                     if (id === 'tools' && authStatus === 'success') {
-                      loadTools();
+                      loadTools(true); // Force refresh when switching tabs
                     }
                     
                     // If user tries to click on a tab requiring auth but isn't authenticated, prompt for Keycloak login
@@ -1863,7 +1902,7 @@ Result: ${JSON.stringify(response)}`,
                   <div className="flex justify-between items-center mb-3">
                     <h2 className="text-xl font-bold">Available Tools</h2>
                     <button
-                      onClick={loadTools}
+                      onClick={() => loadTools(true)} // Force refresh on button click
                       disabled={isToolsRefreshing}
                       className="p-2 rounded-full hover:bg-gray-100"
                       title="Refresh Tools"
@@ -1926,7 +1965,7 @@ Result: ${JSON.stringify(response)}`,
                   <div className="flex justify-between items-center mb-3">
                     <h2 className="text-xl font-bold">Available Apps</h2>
                     <button
-                      onClick={loadWidgets}
+                      onClick={() => loadWidgets(true)} // Force refresh on button click
                       disabled={isAppsRefreshing || !tenantId}
                       className={`p-2 rounded-full hover:bg-gray-100 ${(!tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
                       title={!tenantId ? "Enter Tenant ID to Load Apps" : "Refresh Apps"}
