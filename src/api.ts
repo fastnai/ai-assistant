@@ -258,8 +258,8 @@ export const getTools = async (useCase: string, spaceId: string, authToken: stri
       console.log(`🔄 Making getTools call for ${requestKey}`);
       const response = await api.post('/api/ucl/getTools', {
         input: {
-          useCase,
-          spaceId: spaceId,
+          // useCase,
+          // spaceId: spaceId,
         },
       }, {
         headers: {

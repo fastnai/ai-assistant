@@ -537,6 +537,7 @@ function App() {
     if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
       const timeoutId = setTimeout(() => {
         loadTools(true); // Force refresh when values change
+        // Automatically switch to apps tab when both fields are filled
         setSidebarView('apps');
       }, 500); // 500ms debounce
       
@@ -675,7 +676,8 @@ function App() {
           setStreamingText('');
         },
         selectedModel,
-        spaceId
+        spaceId,
+        apiKey
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -848,7 +850,8 @@ Result: ${JSON.stringify(response)}`,
           setStreamingText('');
         },
         selectedModel,
-        spaceId
+        spaceId,
+        apiKey
       ).catch(error => {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         handleApiError(error);
@@ -1136,17 +1139,14 @@ Result: ${JSON.stringify(response)}`,
       // Reset the state when changing tenant or space
       // setConnectorsDataNull(false);
       
-      if (sidebarView === 'apps') {
-        console.log('Tenant/Space changed - will check for connectors via widget events');
-        // Reload the widget, which will trigger message events for connector availability
-        setWidgetMounted(false);
-        setWidgetKey(prevKey => prevKey + 1);
-        setTimeout(() => {
-          setWidgetMounted(true);
-        }, 1000);
+      // Remove automatic widget reloading when switching to apps tab
+      // Only initialize if not already mounted
+      if (sidebarView === 'apps' && !widgetMounted) {
+        console.log('Initializing widget for first time');
+        setWidgetMounted(true);
       }
     }
-  }, [tenantId, spaceId, authStatus, authToken, sidebarView]);
+  }, [tenantId, spaceId, authStatus, authToken, sidebarView, widgetMounted]);
 
   // Function to inspect widget iframe content
   // const inspectWidgetContent = () => {
@@ -1587,6 +1587,7 @@ Result: ${JSON.stringify(response)}`,
 
   // Effect to initialize widget when first visiting widgets tab
   useEffect(() => {
+    // Only initialize widget when first viewing - don't reload data
     if (sidebarView === 'apps' && !widgetMounted && authStatus === 'success' && tenantId && authToken) {
       setWidgetMounted(true);
       
@@ -1724,7 +1725,7 @@ Result: ${JSON.stringify(response)}`,
       {/* Main content area */}
       <div className="flex h-screen overflow-hidden justify-center items-center">
         {/* Chat area */}
-        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[500px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? '' : 'h-full'}`}>
+        <div className={`flex-1 flex flex-col ${sidebarVisible ? 'mr-[400px]' : ''} transition-all duration-300 max-w-[1000px] ${conversation.messages.length === 0 ? '' : 'h-full'}`}>
           {/* Header */}
           <div className="flex flex-col items-center pt-6 pb-4">
             <Bot 
@@ -1819,19 +1820,19 @@ Result: ${JSON.stringify(response)}`,
         {/* Sidebar Toggle Button */}
         <button 
           onClick={toggleSidebar} 
-          className="fixed right-[500px] top-1/2 transform -translate-y-1/2 bg-[#e8eaff] text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
-          style={{ right: sidebarVisible ? '500px' : '0' }}
+          className="fixed right-[400px] top-1/2 transform -translate-y-1/2 bg-[#e8eaff] text-indigo-700 p-2 rounded-l-lg shadow-md hover:bg-indigo-200 z-30"
+          style={{ right: sidebarVisible ? '400px' : '0' }}
         >
           {sidebarVisible ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
 
         {/* Tools Sidebar */}
         <div 
-          className={`fixed top-0 right-0 my-5 w-[500px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg z-20 ${
+          className={`fixed top-0 right-0 my-5 w-[400px] bg-white shadow-md h-screen transition-transform duration-300 rounded-l-lg z-20 ${
             sidebarVisible ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
-          <div className="h-full p-4 flex flex-col overflow-y-auto">
+          <div className="h-full p-4 flex flex-col">
             {/* Toggle between Config, Tools, and Widgets */}
             <div className="flex mb-1 pb-4">
               <ToggleTabs
@@ -1840,12 +1841,8 @@ Result: ${JSON.stringify(response)}`,
                   if (authStatus === 'success' || id === 'config') {
                     setSidebarView(id as 'tools' | 'apps' | 'config');
                     
-                    // Call loadTools when switching to tools tab
-                    if (id === 'tools' && authStatus === 'success') {
-                      loadTools(true); // Force refresh when switching tabs
-                    }
-                    
-                    // If user tries to click on a tab requiring auth but isn't authenticated, prompt for Keycloak login
+                    // Remove automatic data loading when switching tabs
+                    // Only keep authentication check
                     if (id !== 'config' && authStatus !== 'success') {
                       // Redirect to Keycloak login
                       handleLogin();
@@ -1912,7 +1909,7 @@ Result: ${JSON.stringify(response)}`,
                   </div>
                   
                   {availableTools.length > 0 ? (
-                    <div className="space-y-3 pb-4">
+                    <div className="space-y-3 pb-4 overflow-y-auto h-[calc(100vh-170px)]">
                       {availableTools.map((tool: Tool, index: number) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
                           <div className="flex items-center gap-2 mb-2">
@@ -1947,13 +1944,20 @@ Result: ${JSON.stringify(response)}`,
                           <span className="block mt-3">To set them up, go to the <span className="font-semibold">MCP page</span>, select the relevant <span className="font-semibold">connector</span>, and choose the tools you want to enable.</span>
                         </p>
                         <div className="flex flex-wrap gap-3 justify-center mt-2">
-                          <a 
-                            href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
-                            target="_blank" 
+                          <button 
+                            onClick={() => {
+                              if (connectorsDataNull === true) {
+                                // If there are no apps, navigate to apps tab
+                                setSidebarView('apps');
+                              } else {
+                                // Otherwise, open the external URL
+                                window.open(`https://live.fastn.ai/app/projects/${spaceId}/ucl`, '_blank');
+                              }
+                            }}
                             className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
                           >
                              Add Tools
-                          </a>
+                          </button>
                           
                         </div>
                       </div>
@@ -1961,7 +1965,7 @@ Result: ${JSON.stringify(response)}`,
                   )}
                 </>
               ) : sidebarView === 'apps' ? (
-                <div className="h-full w-full min-h-[500px]">
+                <div className="h-full w-full flex flex-col">
                   <div className="flex justify-between items-center mb-3">
                     <h2 className="text-xl font-bold">Available Apps</h2>
                     <button
@@ -1973,114 +1977,67 @@ Result: ${JSON.stringify(response)}`,
                       <RefreshCw className={`w-5 h-5 ${isAppsRefreshing ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
-                  {tenantId && authToken ? (
-                    <>
-                      {widgetMounted && (
-                        <>
-                          {!!connectorsDataNull ? (
-                            <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
-                              <div className="p-4 bg-indigo-100 rounded-full">
-                                <LayoutGrid className="w-8 h-8 text-indigo-600" />
-                              </div>
-                              <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
-                              
-                              <p className="text-gray-600 max-w-md">
-                                <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
-                              </p>
-                              <div className="flex flex-wrap gap-3 justify-center mt-2">
-                                <a 
-                                  href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
-                                  target="_blank" 
-                                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
-                                >
-                                  Go to MCP
-                                </a>
-                              </div>
-                            </div>
-                          ) : (
-                            <FastnWidget
-                              key={widgetKey}
-                              projectId={spaceId}
-                              authToken={authToken}
-                              tenantId={tenantId}
-                              apiKey={apiKey}
-                              theme="light"
-                              env="DRAFT&enableAIActionAgent=false"
-                              style={{
-                                height: '100%',
-                                width: '100%',
-                                border: 'none',
-                                borderRadius: '8px',
-                              }}
-                            />
-                          )}
-                          
-                          
-                          {/* Response display panel */}
-                          {/* {widgetResponses.length > 0 && (
-                            <div className="mt-4 border border-gray-200 rounded-md bg-gray-50 p-2">
-                              <div className="flex justify-between items-center mb-2">
-                                <h3 className="text-sm font-semibold">Widget Responses ({widgetResponses.length})</h3>
-                                <div className="flex space-x-2">
-                                  <button 
-                                    onClick={inspectWidgetContent}
-                                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                  <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 170px)' }}>
+                    {tenantId && authToken ? (
+                      <>
+                        {widgetMounted && (
+                          <>
+                            {!!connectorsDataNull ? (
+                              <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+                                <div className="p-4 bg-indigo-100 rounded-full">
+                                  <LayoutGrid className="w-8 h-8 text-indigo-600" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
+                                
+                                <p className="text-gray-600 max-w-md">
+                                  <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
+                                </p>
+                                <div className="flex flex-wrap gap-3 justify-center mt-2">
+                                  <a 
+                                    href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
+                                    target="_blank" 
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
                                   >
-                                    Inspect Widget
-                                  </button>
-                                  <button 
-                                    onClick={monitorWidgetConsole}
-                                    className="text-xs bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600"
-                                  >
-                                    Monitor Console
-                                  </button>
-                                  <button 
-                                    onClick={testWidgetAPI}
-                                    className="text-xs bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
-                                  >
-                                    Test API
-                                  </button>
-                                  <button 
-                                    onClick={simulateNullConnectors}
-                                    className="text-xs bg-purple-500 text-white px-2 py-1 rounded hover:bg-purple-600"
-                                  >
-                                    Simulate Null
-                                  </button>
-                                  <button 
-                                    onClick={() => setWidgetResponses([])}
-                                    className="text-xs text-red-500 hover:underline"
-                                  >
-                                    Clear
-                                  </button>
+                                    Go to MCP
+                                  </a>
                                 </div>
                               </div>
-                              <div className="max-h-40 overflow-y-auto text-xs">
-                                {widgetResponses.slice().reverse().map((response, idx) => (
-                                  <div key={idx} className="mb-2 border-b border-gray-200 pb-1">
-                                    <div className="text-gray-500">{response.timestamp}</div>
-                                    <pre className="whitespace-pre-wrap overflow-x-auto bg-white p-1 rounded">
-                                      {JSON.stringify(response.data, null, 2)}
-                                    </pre>
-                                  </div>
-                                ))}
+                            ) : (
+                              <div className="h-full w-full overflow-auto">
+                                <FastnWidget
+                                  key={widgetKey}
+                                  projectId={spaceId}
+                                  authToken={authToken}
+                                  tenantId={tenantId}
+                                  apiKey={apiKey}
+                                  theme="light"
+                                  env="DRAFT&enableAIActionAgent=false"
+                                  style={{
+                                    height: '100%',
+                                    minHeight: '500px',
+                                    width: '100%',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                  }}
+                                />
                               </div>
-                            </div>
-                          )} */}
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <p className="text-gray-500 text-center text-sm px-4">
-                        Enter Tenant ID to view available Apps.
-                      </p>
-                    </div>
-                  )}
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500 text-center text-sm px-4">
+                          Enter Tenant ID to view available Apps.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 // Config View
-                <div className="space-y-4">
-                  <h2 className="text-xl font-bold mb-4 flex justify-between items-center">
+                <div className="space-y-4 overflow-y-auto h-[calc(100vh-170px)]">
+                  <h2 className="text-xl font-bold mb-4 flex justify-between items-center sticky top-0 bg-white py-2">
                     Configuration Settings
                     {authStatus === 'success' && (
                       <>
@@ -2180,6 +2137,7 @@ Result: ${JSON.stringify(response)}`,
                         }
                         body={
                           <div className="space-y-3">
+                           
                             <div>
                               <label htmlFor="config-spaceId" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
                                 <Fingerprint className="w-4 h-4 mr-1 text-gray-500" /> Space ID
@@ -2226,6 +2184,19 @@ Result: ${JSON.stringify(response)}`,
                                   </option>
                                 ))}
                               </select>
+                            </div>
+                            <div>
+                              <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                                <KeyRound className="w-4 h-4 mr-1 text-gray-500" /> API Key
+                              </label>
+                              <input
+                                type="password"
+                                id="config-apiKey"
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                                placeholder="Enter your API Key"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
                             </div>
                           </div>
                         }
