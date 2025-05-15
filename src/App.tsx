@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
@@ -67,6 +67,12 @@ function App() {
     const saved = localStorage.getItem('conversation');
     return saved ? JSON.parse(saved) : { messages: [] };
   });
+  
+  // Add temporary state variables for configuration
+  const [tempApiKey, setTempApiKey] = useState<string>(() => localStorage.getItem('fastnApiKey') || '');
+  const [tempSpaceId, setTempSpaceId] = useState<string>(() => localStorage.getItem('fastnSpaceId') || '');
+  const [tempTenantId, setTempTenantId] = useState<string>(() => localStorage.getItem('fastnTenantId') || '');
+  const [tempSelectedModel, setTempSelectedModel] = useState<string>(() => localStorage.getItem('fastnSelectedModel') || 'gpt-4o');
   
   // Add global event listener for modal events
   React.useEffect(() => {
@@ -407,7 +413,13 @@ function App() {
     setPassword('');
     setTenantId('');
     setSpaceId('');
-    setApiKey('')
+    setApiKey('');
+    // Clear temporary form values as well
+    setTempTenantId('');
+    setTempSpaceId('');
+    setTempApiKey('');
+    // Don't clear selected model completely, just reset to default
+    setTempSelectedModel('gpt-4o');
     // Clear localStorage data
     localStorage.removeItem('fastnAuthToken');
     localStorage.removeItem('fastnRefreshToken');
@@ -419,7 +431,9 @@ function App() {
     localStorage.removeItem('fastnPassword');
     localStorage.removeItem('fastnTenantId');
     localStorage.removeItem('fastnSpaceId');
+    localStorage.removeItem('fastnApiKey');
     localStorage.setItem('fastnAuthStatus', 'idle');
+    localStorage.setItem('fastnSelectedModel', 'gpt-4o'); // Reset to default model
     setToolResults({});
     // Clear the input field
     chatInputRef.current?.resetMessage();
@@ -464,23 +478,24 @@ function App() {
   // Function to handle Space ID change
   const handleSpaceIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newSpaceId = e.target.value;
-    setSpaceId(newSpaceId);
-    
-    // Clear tools and related data when Space ID changes
-    setAvailableTools([]);
-    setConversation({ messages: [] });
-    setToolResults({});
+    setTempSpaceId(newSpaceId); // Update the temporary value
+    // Don't set spaceId directly or clear tools until Update button is clicked
   };
 
   // Function to handle Tenant ID change
   const handleTenantIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTenantId = e.target.value;
-    setTenantId(newTenantId);
-    
-    // Reset widget data when Tenant ID changes
-    setWidgetMounted(false);
-    setWidgetKey(prevKey => prevKey + 1);
+    setTempTenantId(newTenantId); // Update the temporary value
+    // Don't set tenantId directly or reset widget until Update button is clicked
   };
+
+  // Add a new effect to initialize tempSpaceId and tempTenantId when the main variables change
+  useEffect(() => {
+    setTempSpaceId(spaceId);
+    setTempTenantId(tenantId);
+    setTempApiKey(apiKey);
+    setTempSelectedModel(selectedModel);
+  }, [spaceId, tenantId, apiKey, selectedModel]);
 
   // Add debounced functions for loading tools and widgets after typing
   const [debouncedLoadExecutor, setDebouncedLoadExecutor] = useState<NodeJS.Timeout | null>(null);
@@ -1799,47 +1814,63 @@ Result: ${JSON.stringify(response)}`,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, authStatus, auth.isLoading]);
 
-  // Add this function to check if required fields are missing
-  const hasRequiredFields = () => {
+  // Update hasRequiredFields to use useCallback
+  const hasRequiredFields = useCallback(() => {
     return !!spaceId?.trim() && !!tenantId?.trim() && !!apiKey?.trim();
-  };
+  }, [spaceId, tenantId, apiKey]);
 
   // Effect to show settings by default if required fields are missing
   useEffect(() => {
-    // Only show settings automatically if no field is focused
-    if (!isAnyFieldFocused && authStatus === 'success' && !hasRequiredFields()) {
+    // Only show settings automatically if no field is focused and fields are missing
+    if (authStatus === 'success' && !hasRequiredFields()) {
       setIsSettingsVisible(true);
     }
-  }, [authStatus, spaceId, tenantId, apiKey, isAnyFieldFocused]); // Add isAnyFieldFocused to dependencies
+  }, [authStatus]); // Only check on auth status change, not field changes
 
-  // On successful login, hide the settings panel if required fields are set
-  useEffect(() => {
-    // Only auto-hide settings if no field is focused
-    if (!isAnyFieldFocused && authStatus === 'success' && hasRequiredFields()) {
+  // Remove the auto-hiding useEffect that previously depended on field changes
+
+  // Update the function to handle form update
+  const handleUpdateSettings = () => {
+    // Store the values we're going to use for navigation check locally
+    const newSpaceId = tempSpaceId;
+    const newTenantId = tempTenantId;
+    const newApiKey = tempApiKey;
+    const newModel = tempSelectedModel;
+    
+    // First, apply all the state updates
+    setApiKey(newApiKey);
+    setSpaceId(newSpaceId);
+    setTenantId(newTenantId);
+    setSelectedModel(newModel);
+
+    // Hide settings panel
       setIsSettingsVisible(false);
-    }
-  }, [authStatus, spaceId, tenantId, apiKey, isAnyFieldFocused]); // Add isAnyFieldFocused to dependencies
-
-  // Add a function to handle completing the settings
-  const handleSaveSettings = () => {
-    // Don't do anything if any field is focused
-    if (isAnyFieldFocused) {
-      console.log('Field is focused, not saving or navigating');
-      return;
-    }
-
-    // Only check if user is authenticated
-    if (authStatus === 'success') {
-      setIsSettingsVisible(false);
-      // Only navigate to apps tab if all required fields are filled
-      if (hasRequiredFields()) {
-        console.log('All required fields filled, navigating to apps tab');
+    
+    // Use a short timeout to ensure React has processed the state updates
+    setTimeout(() => {
+      // Check if all required fields are filled using the local values
+      if (authStatus === 'success' && newSpaceId?.trim() && newTenantId?.trim() && newApiKey?.trim()) {
+        console.log('Settings updated successfully, navigating to apps tab');
         setSidebarView('apps');
+        
+        // Force reload tools with new settings
+        loadTools(true);
       } else {
-        console.log('Some required fields missing, staying on current tab');
+        console.log('Settings updated but some fields are still missing');
       }
+    }, 50); // Short timeout to ensure state updates have been processed
+  };
+
+  // Update the handleSaveSettings to just close the panel without saving
+  const handleSaveSettings = () => {
+    // If the update button was clicked, update values and possibly navigate
+    if (shouldShowSettings) {
+      // Call the update function which handles all the logic
+      handleUpdateSettings();
     } else {
+      // Just close the panel without saving or navigating
       setIsSettingsVisible(false);
+      setShouldShowSettings(false);
     }
   };
 
@@ -1967,11 +1998,11 @@ Result: ${JSON.stringify(response)}`,
                 <div className="flex items-center mb-4 pb-4 border-b">
                   <button 
                     onClick={() => {
+                      // Just close settings without updating
                       setShouldShowSettings(false);
-                      handleSaveSettings();
+                      setIsSettingsVisible(false);
                     }}
-                    disabled={!hasRequiredFields()}
-                    className={`p-2 rounded-full ${hasRequiredFields() ? 'hover:bg-gray-100' : 'opacity-50 cursor-not-allowed'} mr-2`}
+                    className="p-2 rounded-full hover:bg-gray-100 mr-2"
                   >
                     <ArrowLeft className="w-5 h-5" />
                   </button>
@@ -2003,7 +2034,7 @@ Result: ${JSON.stringify(response)}`,
                     delayShow={300}
                   />
                 </div>
-                <div className="space-y-4 overflow-y-auto h-[calc(100vh-170px)]">
+                <div className="space-y-4 overflow-y-auto h-[calc(100vh-240px)]">
                   <div className="space-y-3">
                     {/* Authentication section - only visible when not authenticated */}
                     {authStatus !== 'success' && (
@@ -2080,8 +2111,8 @@ Result: ${JSON.stringify(response)}`,
                               <input
                                 type="text"
                                 id="config-spaceId"
-                                value={spaceId}
-                                onChange={handleSpaceIdChange}
+                                value={tempSpaceId}
+                                onChange={(e) => setTempSpaceId(e.target.value)}
                                 onFocus={() => setIsSpaceIdFocused(true)}
                                 onBlur={() => setIsSpaceIdFocused(false)}
                                 placeholder="Enter your Space ID"
@@ -2095,8 +2126,8 @@ Result: ${JSON.stringify(response)}`,
                               <input
                                 type="text"
                                 id="config-tenantId"
-                                value={tenantId}
-                                onChange={handleTenantIdChange}
+                                value={tempTenantId}
+                                onChange={(e) => setTempTenantId(e.target.value)}
                                 onFocus={() => setIsTenantIdFocused(true)}
                                 onBlur={() => setIsTenantIdFocused(false)}
                                 placeholder="Enter your Tenant ID"
@@ -2109,8 +2140,8 @@ Result: ${JSON.stringify(response)}`,
                               </label>
                               <select
                                 id="config-selectedModel"
-                                value={selectedModel}
-                                onChange={(e) => setSelectedModel(e.target.value)}
+                                value={tempSelectedModel}
+                                onChange={(e) => setTempSelectedModel(e.target.value)}
                                 onFocus={() => setIsModelSelectFocused(true)}
                                 onBlur={() => setIsModelSelectFocused(false)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
@@ -2121,19 +2152,6 @@ Result: ${JSON.stringify(response)}`,
                                   </option>
                                 ))}
                               </select>
-                              
-                              {/* Add helper text to explain the filtering */}
-                              {/* {apiKey && (
-                                <div className="mt-1 text-xs text-gray-500">
-                                  {apiKey.toLowerCase().startsWith('sk-') ? (
-                                    <span>Showing OpenAI models (API key starts with sk-)</span>
-                                  ) : apiKey.toLowerCase().startsWith('ai') ? (
-                                    <span>Showing Gemini models (API key starts with AI)</span>
-                                  ) : (
-                                    <span>Showing all available models</span>
-                                  )}
-                                </div>
-                              )} */}
                             </div>
                             <div>
                               <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
@@ -2142,34 +2160,50 @@ Result: ${JSON.stringify(response)}`,
                               <input
                                 type="password"
                                 id="config-apiKey"
-                                value={apiKey}
-                                onChange={(e) => {
-                                  const newApiKey = e.target.value;
-                                  setApiKey(newApiKey);
-                                  
-                                  // Immediately check if we need to update the model
-                                  const filteredModels = newApiKey.toLowerCase().startsWith('sk-') 
-                                    ? modelsWithToolCalls.filter(model => model.provider === 'openai')
-                                    : newApiKey.toLowerCase().startsWith('ai')
-                                      ? modelsWithToolCalls.filter(model => model.provider === 'gemini')
-                                      : modelsWithToolCalls;
-                                  
-                                  // Check if current model is valid with the new API key
-                                  const isCurrentModelValid = filteredModels.some(model => model.id === selectedModel);
-                                  
-                                  // If not valid, select the first model from the filtered list
-                                  if (!isCurrentModelValid && filteredModels.length > 0) {
-                                    setSelectedModel(filteredModels[0].id);
-                                    localStorage.setItem('fastnSelectedModel', filteredModels[0].id);
-                                  }
-                                }}
+                                value={tempApiKey}
+                                onChange={(e) => setTempApiKey(e.target.value)}
                                 onFocus={() => setIsApiKeyFocused(true)}
                                 onBlur={() => setIsApiKeyFocused(false)}
                                 placeholder="Enter your API Key"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
-                              
                             </div>
+                            
+                            {/* Add Update Configuration button */}
+                            <div className='flex flex-row justify-between'>
+                              <div></div>
+                            <div className="mt-4">
+                              <button
+                                onClick={() => {
+                                  // Directly update all state values here
+                                  const newSpaceId = tempSpaceId;
+                                  const newTenantId = tempTenantId;
+                                  const newApiKey = tempApiKey;
+                                  const newModel = tempSelectedModel;
+
+                                  // Apply updates
+                                  setApiKey(newApiKey);
+                                  setSpaceId(newSpaceId);
+                                  setTenantId(newTenantId);
+                                  setSelectedModel(newModel);
+                                  
+                                  // Hide settings immediately
+                                  setIsSettingsVisible(false);
+                                  
+                                  // Only navigate if fields are filled
+                                  if (authStatus === 'success' && newSpaceId?.trim() && newTenantId?.trim() && newApiKey?.trim()) {
+                                    // Force an immediate navigation after a very brief delay
+                                    setTimeout(() => {
+                                      setSidebarView('apps');
+                                      loadTools(true);
+                                    }, 10);
+                                  }
+                                }}
+                                className="w-fit py-2 px-4 bg-black hover:bg-white hover:text-black text-white font-medium rounded-md shadow transition-colors"
+                              >
+                                Update
+                              </button>
+                            </div></div>
                           </div>
                         }
                         isCollapsible={true}
