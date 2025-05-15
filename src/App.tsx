@@ -270,12 +270,12 @@ function App() {
   
   // Filter models based on API key prefix
   const getFilteredModels = () => {
-    if (apiKey.toLowerCase().startsWith('sk-')) {
+    if (apiKey.startsWith('sk-')) {
       return modelsWithToolCalls.filter(model => model.provider === 'openai');
-    } else if (apiKey.toLowerCase().startsWith('ai')) {
+    } else if (apiKey.startsWith('AI')) {
       return modelsWithToolCalls.filter(model => model.provider === 'gemini');
     }
-    return modelsWithToolCalls;
+    return []; // Return empty array if neither prefix matches
   };
   
   // Close the auth box when user logs in
@@ -2318,13 +2318,7 @@ Result: ${JSON.stringify(response)}`,
                             <Wrench className="w-5 h-5 text-blue-500" />
                             <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
                           </div>
-                          <p className="text-sm text-gray-600 pl-7">{
-                            tool.function.description
-                              .split('. ')[0]
-                              .replace("This tool is designed to execute the ", "")
-                              .replace(" operation on the ", " - ")
-                              .replace(" platform", "")
-                          }</p>
+                          <p className="text-xs text-gray-600 pl-7">{tool.function.description}</p>
                         </div>
                       ))}
                     </div>
