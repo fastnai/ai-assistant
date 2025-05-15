@@ -4,13 +4,50 @@ import { ChatInput, ChatInputHandles } from './components/ChatInput';
 import { Message, Conversation, Tool } from './types';
 import { getTools, executeTool } from './api';
 import { getStreamingAIResponse, getToolExecutionResponse } from './llmCall';
-import { RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, LogOut, Bot } from 'lucide-react';
+import { RefreshCw, ChevronRight, ChevronLeft, Wrench, Trash2, KeyRound, Fingerprint, LayoutGrid, LogOut, Bot, Settings, ArrowLeft } from 'lucide-react';
 import FastnWidget from '@fastn-ai/widget-react';
 import { useAuth } from "react-oidc-context";
 import { ToggleTabs } from './components/ToggleTabs';
 import AuthBox from './components/AuthBox';
 import { Tooltip } from "react-tooltip";
 import { User as OidcUser } from 'oidc-client-ts';
+
+// Add OAuth popup dimensions calculation function
+export const getOauthPopUpDimensions = (paramStr = window.location.search) => {
+  const params = new URLSearchParams(paramStr);
+  const isMobile = window.innerWidth < 768; // Check if device is mobile
+  const isMedium = window.innerWidth >= 768 && window.innerWidth < 1024; // Check if medium screen
+
+  const screenWidth =
+    Number(params.get("oauth-popup-screen-width")) || window.innerWidth;
+  const screenHeight =
+    Number(params.get("oauth-popup-screen-height")) || window.innerHeight;
+
+  // Adjust dimensions based on screen size
+  let width, height, top, left;
+
+  if (isMobile) {
+    // Mobile dimensions
+    width = screenWidth - 20; // Almost full width on mobile
+    height = screenHeight - 80; // Almost full height on mobile
+    top = 40; // Position closer to top on mobile
+    left = 10; // Small margin on mobile
+  } else if (isMedium) {
+    // Medium screen dimensions
+    width = Math.min(screenWidth - 60, 700); // Slightly smaller than desktop
+    height = Math.min(screenHeight - 80, 800); // Slightly smaller than desktop
+    top = Math.max((screenHeight - height) / 2, 40); // Centered with min distance from top
+    left = Math.max((screenWidth - width) / 2, 30); // Centered with min distance from left
+  } else {
+    // Desktop dimensions
+    width = Number(params.get("oauth-popup-width")) || Math.min(screenWidth - 100, 900);
+    height = Number(params.get("oauth-popup-height")) || Math.min(screenHeight - 100, 900);
+    top = Number(params.get("oauth-popup-top")) || Math.max((screenHeight - height) / 2, 100);
+    left = Number(params.get("oauth-popup-left")) || Math.max((screenWidth - width) / 2, 50);
+  }
+
+  return { width, height, top, left };
+};
 
 // Add interface for extended user type
 interface ExtendedUser extends OidcUser {
@@ -25,6 +62,7 @@ let hasLoadedToolsGlobal = false;
 let hasCheckedSessionGlobal = false;
 
 function App() {
+  // Force recompile
   const [conversation, setConversation] = useState<Conversation>(() => {
     const saved = localStorage.getItem('conversation');
     return saved ? JSON.parse(saved) : { messages: [] };
@@ -164,7 +202,7 @@ function App() {
     return saved ? parseInt(saved) : 0;
   });
 
-  const [sidebarView, setSidebarView] = useState<'tools' | 'apps' | 'config'>('config');
+  const [sidebarView, setSidebarView] = useState<'tools' | 'apps'>('apps');
   const [widgetMounted, setWidgetMounted] = useState<boolean>(false);
   const [widgetResponses, setWidgetResponses] = useState<any[]>([]);
   const [connectorsDataNull, setConnectorsDataNull] = useState<boolean | null>(null);
@@ -189,6 +227,17 @@ function App() {
   const [lastSessionCheckTime, setLastSessionCheckTime] = useState<number>(0);
   const SESSION_CHECK_INTERVAL = 300000; // 5 minutes in milliseconds
 
+  const [authBoxExpanded, setAuthBoxExpanded] = useState<boolean>(() => authStatus !== 'success');
+  const [isSettingsVisible, setIsSettingsVisible] = useState<boolean>(false);
+
+  // Add state to track if settings panel should be showing
+  const [shouldShowSettings, setShouldShowSettings] = useState<boolean>(false);
+
+  // Add this useEffect to monitor isSettingsVisible changes
+  useEffect(() => {
+    console.log('isSettingsVisible changed to:', isSettingsVisible);
+  }, [isSettingsVisible]);
+
   // Effect to automatically redirect to Keycloak when not authenticated
   useEffect(() => {
     if (!auth.isLoading && !auth.isAuthenticated) {
@@ -202,26 +251,31 @@ function App() {
     // { name: 'Claude 3.7 Sonnet', id: 'claude-3-7-sonnet-20250219' },
     // { name: 'Claude 3.5 Sonnet', id: 'claude-3-5-sonnet-20241022' },
     // { name: 'Claude 3.5 Haiku', id: 'claude-3-5-haiku-20241022' },
-    { name: 'GPT-4o', id: 'gpt-4o' },
-    { name: 'GPT-4o-mini', id: 'gpt-4o-mini' },
-    { name : "O3-mini", id: "o3-mini"},
-    { name: 'GPT-4 Turbo', id: 'gpt-4' },
-    { name: 'GPT-3.5 Turbo', id: 'gpt-3.5-turbo' },
-    { name: 'Gemini 1.5 Pro 001', id: 'gemini-1.5-pro-001' },
-    { name: 'Gemini 1.5 Pro 002', id: 'gemini-1.5-pro-002' },
-    { name: 'Gemini 1.5 Flash 002', id: 'gemini-1.5-flash-002' },
-    { name: 'Gemini 2.0 Flash 001', id: 'gemini-2.0-flash-001' }
+    { name: 'GPT-4o', id: 'gpt-4o', provider: 'openai' },
+    { name: 'GPT-4o-mini', id: 'gpt-4o-mini', provider: 'openai' },
+    { name : "O3-mini", id: "o3-mini", provider: 'openai' },
+    { name: 'GPT-4 Turbo', id: 'gpt-4', provider: 'openai' },
+    { name: 'GPT-3.5 Turbo', id: 'gpt-3.5-turbo', provider: 'openai' },
+    { name: 'Gemini 1.5 Pro 001', id: 'gemini-1.5-pro-001', provider: 'gemini' },
+    { name: 'Gemini 1.5 Pro 002', id: 'gemini-1.5-pro-002', provider: 'gemini' },
+    { name: 'Gemini 1.5 Flash 002', id: 'gemini-1.5-flash-002', provider: 'gemini' },
+    { name: 'Gemini 2.0 Flash 001', id: 'gemini-2.0-flash-001', provider: 'gemini' }
   ];
-
-  // State to control the authentication box expansion
-  const [authBoxExpanded, setAuthBoxExpanded] = useState<boolean>(() => authStatus !== 'success');
+  
+  // Filter models based on API key prefix
+  const getFilteredModels = () => {
+    if (apiKey.toLowerCase().startsWith('sk-')) {
+      return modelsWithToolCalls.filter(model => model.provider === 'openai');
+    } else if (apiKey.toLowerCase().startsWith('ai')) {
+      return modelsWithToolCalls.filter(model => model.provider === 'gemini');
+    }
+    return modelsWithToolCalls;
+  };
   
   // Close the auth box when user logs in
   useEffect(() => {
     if (authStatus === 'success') {
       setAuthBoxExpanded(false);
-    } else {
-      setAuthBoxExpanded(true);
     }
   }, [authStatus]);
 
@@ -239,6 +293,21 @@ function App() {
   useEffect(() => {
     localStorage.setItem('fastnApiKey', apiKey);
   }, [apiKey]);
+
+  // Add effect to update selected model when API key changes
+  useEffect(() => {
+    // Get the filtered models based on the API key
+    const filteredModels = getFilteredModels();
+    
+    // Check if the current selected model is in the filtered list
+    const isCurrentModelValid = filteredModels.some(model => model.id === selectedModel);
+    
+    // If not valid, select the first model from the filtered list
+    if (!isCurrentModelValid && filteredModels.length > 0) {
+      setSelectedModel(filteredModels[0].id);
+      localStorage.setItem('fastnSelectedModel', filteredModels[0].id);
+    }
+  }, [apiKey, selectedModel]);
 
   useEffect(() => {
     localStorage.setItem('fastnSpaceId', spaceId);
@@ -362,16 +431,16 @@ function App() {
     setWidgetResponses([]);
     setConnectorsDataNull(null);
     // Switch to config view
-    setSidebarView('config');
+    setSidebarView('apps');
     // Clear conversation
     setConversation({ messages: [] });
     console.log('User logged out');
   };
 
-  // Make sure unauthenticated users stay on the config tab
+  // Make sure unauthenticated users stay on the apps tab
   useEffect(() => {
-    if (authStatus !== 'success' && sidebarView !== 'config') {
-      setSidebarView('config');
+    if (authStatus !== 'success' && sidebarView !== 'apps') {
+      setSidebarView('apps');
     }
   }, [authStatus, sidebarView]);
 
@@ -381,6 +450,15 @@ function App() {
   // Add state for tracking input focus
   const [isSpaceIdFocused, setIsSpaceIdFocused] = useState(false);
   const [isTenantIdFocused, setIsTenantIdFocused] = useState(false);
+
+  // Add a state for API key focus
+  const [isApiKeyFocused, setIsApiKeyFocused] = useState(false);
+
+  // Add state for model select focus
+  const [isModelSelectFocused, setIsModelSelectFocused] = useState(false);
+
+  // Update the isAnyFieldFocused check to include API key and model select
+  const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused || isApiKeyFocused || isModelSelectFocused;
 
   // Function to handle Space ID change
   const handleSpaceIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -523,7 +601,7 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, authStatus, auth.isLoading]);
 
-  // Replace the useEffect for tools/widgets loading after typing
+  // Fix the useEffect that's causing premature navigation
   useEffect(() => {
     // Clear any existing timeout
     if (debouncedLoadExecutor) {
@@ -531,14 +609,14 @@ function App() {
     }
     
     // Only proceed if neither field is focused
-    const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused;
+    const isAnyFieldFocused = isSpaceIdFocused || isTenantIdFocused || isApiKeyFocused || isModelSelectFocused;
     
     // If both values are provided and user is authenticated, set a new timeout
     if (authStatus === 'success' && authToken && spaceId?.trim() && tenantId?.trim() && !isAnyFieldFocused) {
       const timeoutId = setTimeout(() => {
         loadTools(true); // Force refresh when values change
-        // Automatically switch to apps tab when both fields are filled
-        setSidebarView('apps');
+        // NEVER navigate automatically
+        // setSidebarView('apps'); 
       }, 500); // 500ms debounce
       
       setDebouncedLoadExecutor(timeoutId);
@@ -557,7 +635,7 @@ function App() {
         clearTimeout(debouncedLoadExecutor);
       }
     };
-  }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused]);
+  }, [spaceId, tenantId, authStatus, authToken, isSpaceIdFocused, isTenantIdFocused, isApiKeyFocused, isModelSelectFocused]);
 
   // Helper function to create a modified conversation history that includes tool execution results
   const prepareContextForLLM = (messages: Message[]) => {
@@ -1720,6 +1798,50 @@ Result: ${JSON.stringify(response)}`,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, authStatus, auth.isLoading]);
 
+  // Add this function to check if required fields are missing
+  const hasRequiredFields = () => {
+    return !!spaceId?.trim() && !!tenantId?.trim() && !!apiKey?.trim();
+  };
+
+  // Effect to show settings by default if required fields are missing
+  useEffect(() => {
+    // Only show settings automatically if no field is focused
+    if (!isAnyFieldFocused && authStatus === 'success' && !hasRequiredFields()) {
+      setIsSettingsVisible(true);
+    }
+  }, [authStatus, spaceId, tenantId, apiKey, isAnyFieldFocused]); // Add isAnyFieldFocused to dependencies
+
+  // On successful login, hide the settings panel if required fields are set
+  useEffect(() => {
+    // Only auto-hide settings if no field is focused
+    if (!isAnyFieldFocused && authStatus === 'success' && hasRequiredFields()) {
+      setIsSettingsVisible(false);
+    }
+  }, [authStatus, spaceId, tenantId, apiKey, isAnyFieldFocused]); // Add isAnyFieldFocused to dependencies
+
+  // Add a function to handle completing the settings
+  const handleSaveSettings = () => {
+    // Don't do anything if any field is focused
+    if (isAnyFieldFocused) {
+      console.log('Field is focused, not saving or navigating');
+      return;
+    }
+
+    // Only check if user is authenticated
+    if (authStatus === 'success') {
+      setIsSettingsVisible(false);
+      // Only navigate to apps tab if all required fields are filled
+      if (hasRequiredFields()) {
+        console.log('All required fields filled, navigating to apps tab');
+        setSidebarView('apps');
+      } else {
+        console.log('Some required fields missing, staying on current tab');
+      }
+    } else {
+      setIsSettingsVisible(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
       {/* Main content area */}
@@ -1788,12 +1910,12 @@ Result: ${JSON.stringify(response)}`,
           
           {/* Chat input */}
           <div className="p-4">
-            <div className={`bg-white rounded-lg shadow-md px-2 py-2 ${(authStatus !== 'success' || availableTools.length === 0) ? 'bg-opacity-75' : ''}`}>
+            <div className={`bg-white rounded-lg shadow-md px-2 py-2 ${(authStatus !== 'success' || availableTools.length === 0 || !hasRequiredFields()) ? 'bg-opacity-75' : ''}`}>
               <ChatInput 
                 ref={chatInputRef}
                 onSendMessage={handleSendMessage} 
-                disabled={isLoading || authStatus !== 'success' || availableTools.length === 0} 
-                className={authStatus !== 'success' || availableTools.length === 0 ? 'opacity-50' : ''}
+                disabled={isLoading || authStatus !== 'success' || availableTools.length === 0 || !hasRequiredFields()} 
+                className={authStatus !== 'success' || availableTools.length === 0 || !hasRequiredFields() ? 'opacity-50' : ''}
                 authStatus={authStatus}
                 
               />
@@ -1801,6 +1923,11 @@ Result: ${JSON.stringify(response)}`,
                 <div className="text-center mt-2 text-sm text-gray-500">
                   <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-[#5B5EF0] border-r-transparent align-[-0.125em] mr-2"></div>
                   Processing your request...
+                </div>
+              )}
+              {authStatus === 'success' && !hasRequiredFields() && (
+                <div className="text-center mt-2 text-sm text-amber-600">
+                  Please fill all required fields in settings to start the conversation
                 </div>
               )}
               {/* {authStatus !== 'success' && (
@@ -1833,242 +1960,49 @@ Result: ${JSON.stringify(response)}`,
           }`}
         >
           <div className="h-full p-4 flex flex-col">
-            {/* Toggle between Config, Tools, and Widgets */}
-            <div className="flex mb-1 pb-4">
-              <ToggleTabs
-                selectedTab={sidebarView}
-                setSelectedTab={(id) => {
-                  if (authStatus === 'success' || id === 'config') {
-                    setSidebarView(id as 'tools' | 'apps' | 'config');
-                    
-                    // Remove automatic data loading when switching tabs
-                    // Only keep authentication check
-                    if (id !== 'config' && authStatus !== 'success') {
-                      // Redirect to Keycloak login
-                      handleLogin();
-                    }
-                  }
-                }}
-                tabs={[
-                  {
-                    id: 'config',
-                    name: 'Config',
-                    icon: <KeyRound className="w-4 h-4" />
-                  },
-                  {
-                    id: 'apps',
-                    name: 'Apps',
-                    icon: <LayoutGrid className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim(),
-                    disabledReason: authStatus !== 'success' 
-                      ? "Please log in to access Apps" 
-                      : !tenantId?.trim() 
-                        ? "Tenant ID is required to access Apps" 
-                        : !spaceId?.trim() 
-                          ? "Space ID is required to access Apps" 
-                          : ""
-                  },
-                  {
-                    id: 'tools',
-                    name: 'Tools',
-                    icon: <Wrench className="w-4 h-4" />,
-                    disabled: authStatus !== 'success' || !spaceId?.trim(),
-                    disabledReason: authStatus !== 'success'
-                      ? "Please log in to access Tools"
-                      : !spaceId?.trim()
-                        ? "Space ID is required to access Tools"
-                        : ""
-                  }
-                ]}
-                className="w-full"
-              />
-            </div>
-
-            {/* Authentication required message */}
-            {authStatus !== 'success' && (
-              <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
-                <div className="mr-2 flex-shrink-0">⚠️</div>
-                <div>Please log in to access Tools and Apps</div>
-              </div>
-            )}
-
-            {/* Content based on selected view */}
-            <div className="flex-1">
-              {sidebarView === 'tools' ? (
-                <>
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xl font-bold">Available Tools</h2>
-                    <button
-                      onClick={() => loadTools(true)} // Force refresh on button click
-                      disabled={isToolsRefreshing}
-                      className="p-2 rounded-full hover:bg-gray-100"
-                      title="Refresh Tools"
+            {isSettingsVisible ? (
+              // Settings Panel
+              <>
+                <div className="flex items-center mb-4 pb-4 border-b">
+                  <button 
+                    onClick={() => {
+                      setShouldShowSettings(false);
+                      handleSaveSettings();
+                    }}
+                    disabled={!hasRequiredFields()}
+                    className={`p-2 rounded-full ${hasRequiredFields() ? 'hover:bg-gray-100' : 'opacity-50 cursor-not-allowed'} mr-2`}
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                  <h2 className="text-xl font-bold">Configuration Settings</h2>
+                  {authStatus === 'success' && (
+                    <button 
+                      onClick={handleLogout}
+                      className="p-1 rounded-full text-gray-600 hover:text-red-600 ml-auto"
+                      data-tooltip-id="logout"
+                      data-tooltip-content="Logout"
                     >
-                      <RefreshCw className={`w-5 h-5 ${isToolsRefreshing ? 'animate-spin' : ''}`} />
+                      <LogOut className="w-4 h-4" />
                     </button>
-                  </div>
-                  
-                  {availableTools.length > 0 ? (
-                    <div className="space-y-3 pb-4 overflow-y-auto h-[calc(100vh-170px)]">
-                      {availableTools.map((tool: Tool, index: number) => (
-                        <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Wrench className="w-5 h-5 text-blue-500" />
-                            <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
-                          </div>
-                          <p className="text-sm text-gray-600 pl-7">{
-                            tool.function.description
-                              .split('. ')[0]
-                              .replace("This tool is designed to execute the ", "")
-                              .replace(" operation on the ", " - ")
-                              .replace(" platform", "")
-                          }</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    isToolsRefreshing ? (
-                      <div className="flex items-center justify-center h-20">
-                        <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-solid border-indigo-600 border-r-transparent align-[-0.125em] mr-2"></div>
-                        <p className="text-gray-600">Loading tools...</p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg  space-y-4">
-                        <div className="p-4 bg-indigo-100 rounded-full">
-                          <Wrench className="w-8 h-8 text-indigo-600" />
-                        </div>
-                        <h3 className="text-lg font-semibold text-gray-800">No Tools Available</h3>
-                        
-                        <p className="text-gray-600 max-w-md">
-                          
-                          <span className="block mt-3">To set them up, go to the <span className="font-semibold">MCP page</span>, select the relevant <span className="font-semibold">connector</span>, and choose the tools you want to enable.</span>
-                        </p>
-                        <div className="flex flex-wrap gap-3 justify-center mt-2">
-                          <button 
-                            onClick={() => {
-                              if (connectorsDataNull === true) {
-                                // If there are no apps, navigate to apps tab
-                                setSidebarView('apps');
-                              } else {
-                                // Otherwise, open the external URL
-                                window.open(`https://live.fastn.ai/app/projects/${spaceId}/ucl`, '_blank');
-                              }
-                            }}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
-                          >
-                             Add Tools
-                          </button>
-                          
-                        </div>
-                      </div>
-                    )
                   )}
-                </>
-              ) : sidebarView === 'apps' ? (
-                <div className="h-full w-full flex flex-col">
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xl font-bold">Available Apps</h2>
-                    <button
-                      onClick={() => loadWidgets(true)} // Force refresh on button click
-                      disabled={isAppsRefreshing || !tenantId}
-                      className={`p-2 rounded-full hover:bg-gray-100 ${(!tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title={!tenantId ? "Enter Tenant ID to Load Apps" : "Refresh Apps"}
-                    >
-                      <RefreshCw className={`w-5 h-5 ${isAppsRefreshing ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 170px)' }}>
-                    {tenantId && authToken ? (
-                      <>
-                        {widgetMounted && (
-                          <>
-                            {!!connectorsDataNull ? (
-                              <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
-                                <div className="p-4 bg-indigo-100 rounded-full">
-                                  <LayoutGrid className="w-8 h-8 text-indigo-600" />
-                                </div>
-                                <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
-                                
-                                <p className="text-gray-600 max-w-md">
-                                  <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
-                                </p>
-                                <div className="flex flex-wrap gap-3 justify-center mt-2">
-                                  <a 
-                                    href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
-                                    target="_blank" 
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
-                                  >
-                                    Go to MCP
-                                  </a>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="h-full w-full overflow-auto">
-                                <FastnWidget
-                                  key={widgetKey}
-                                  projectId={spaceId}
-                                  authToken={authToken}
-                                  tenantId={tenantId}
-                                  apiKey={apiKey}
-                                  theme="light"
-                                  env="DRAFT&enableAIActionAgent=false"
-                                  style={{
-                                    height: '100%',
-                                    minHeight: '500px',
-                                    width: '100%',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <p className="text-gray-500 text-center text-sm px-4">
-                          Enter Tenant ID to view available Apps.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                  <Tooltip
+                    style={{
+                      borderRadius: "4px",
+                      border: "1px solid #000",
+                      backgroundColor: "#000",
+                      color: "#fff",
+                      zIndex: 30,
+                      fontSize: "12px",
+                      padding: "4px 8px",
+                      maxWidth: "80px"
+                    }}
+                    id="logout"
+                    place="top"
+                    delayHide={100}
+                    delayShow={300}
+                  />
                 </div>
-              ) : (
-                // Config View
                 <div className="space-y-4 overflow-y-auto h-[calc(100vh-170px)]">
-                  <h2 className="text-xl font-bold mb-4 flex justify-between items-center sticky top-0 bg-white py-2">
-                    Configuration Settings
-                    {authStatus === 'success' && (
-                      <>
-                        <button 
-                          onClick={handleLogout}
-                          className="p-1 rounded-full text-gray-600 hover:text-red-600"
-                          data-tooltip-id="logout"
-                          data-tooltip-content="Logout"
-                        >
-                          <LogOut className="w-4 h-4" />
-                        </button>
-                        <Tooltip
-                          style={{
-                            borderRadius: "4px",
-                            border: "1px solid #000",
-                            backgroundColor: "#000",
-                            color: "#fff",
-                            zIndex: 30,
-                            fontSize: "12px",
-                            padding: "4px 8px",
-                            maxWidth: "80px"
-                          }}
-                          id="logout"
-                          place="top"
-                          delayHide={100}
-                          delayShow={300}
-                        />
-                      </>
-                    )}
-                  </h2>
-                  
                   <div className="space-y-3">
                     {/* Authentication section - only visible when not authenticated */}
                     {authStatus !== 'success' && (
@@ -2176,14 +2110,29 @@ Result: ${JSON.stringify(response)}`,
                                 id="config-selectedModel"
                                 value={selectedModel}
                                 onChange={(e) => setSelectedModel(e.target.value)}
+                                onFocus={() => setIsModelSelectFocused(true)}
+                                onBlur={() => setIsModelSelectFocused(false)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               >
-                                {modelsWithToolCalls.map((model) => (
+                                {getFilteredModels().map((model) => (
                                   <option key={model.id} value={model.id}>
                                     {model.name}
                                   </option>
                                 ))}
                               </select>
+                              
+                              {/* Add helper text to explain the filtering */}
+                              {/* {apiKey && (
+                                <div className="mt-1 text-xs text-gray-500">
+                                  {apiKey.toLowerCase().startsWith('sk-') ? (
+                                    <span>Showing OpenAI models (API key starts with sk-)</span>
+                                  ) : apiKey.toLowerCase().startsWith('ai') ? (
+                                    <span>Showing Gemini models (API key starts with AI)</span>
+                                  ) : (
+                                    <span>Showing all available models</span>
+                                  )}
+                                </div>
+                              )} */}
                             </div>
                             <div>
                               <label htmlFor="config-apiKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
@@ -2193,10 +2142,32 @@ Result: ${JSON.stringify(response)}`,
                                 type="password"
                                 id="config-apiKey"
                                 value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
+                                onChange={(e) => {
+                                  const newApiKey = e.target.value;
+                                  setApiKey(newApiKey);
+                                  
+                                  // Immediately check if we need to update the model
+                                  const filteredModels = newApiKey.toLowerCase().startsWith('sk-') 
+                                    ? modelsWithToolCalls.filter(model => model.provider === 'openai')
+                                    : newApiKey.toLowerCase().startsWith('ai')
+                                      ? modelsWithToolCalls.filter(model => model.provider === 'gemini')
+                                      : modelsWithToolCalls;
+                                  
+                                  // Check if current model is valid with the new API key
+                                  const isCurrentModelValid = filteredModels.some(model => model.id === selectedModel);
+                                  
+                                  // If not valid, select the first model from the filtered list
+                                  if (!isCurrentModelValid && filteredModels.length > 0) {
+                                    setSelectedModel(filteredModels[0].id);
+                                    localStorage.setItem('fastnSelectedModel', filteredModels[0].id);
+                                  }
+                                }}
+                                onFocus={() => setIsApiKeyFocused(true)}
+                                onBlur={() => setIsApiKeyFocused(false)}
                                 placeholder="Enter your API Key"
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                               />
+                              
                             </div>
                           </div>
                         }
@@ -2206,10 +2177,243 @@ Result: ${JSON.stringify(response)}`,
                     )}
                   </div>
                 </div>
-              )}
+              </>
+            ) : (
+              // Tabs view
+              <>
+                <div className="flex mb-1 pb-4 items-center">
+              <ToggleTabs
+                selectedTab={sidebarView}
+                setSelectedTab={(id) => {
+                      if (authStatus === 'success') {
+                        setSidebarView(id as 'tools' | 'apps');
+                  }
+                }}
+                tabs={[
+                  {
+                    id: 'apps',
+                    name: 'Apps',
+                    icon: <LayoutGrid className="w-4 h-4" />,
+                    disabled: authStatus !== 'success' || !tenantId?.trim() || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success' 
+                      ? "Please log in to access Apps" 
+                      : !tenantId?.trim() 
+                        ? "Tenant ID is required to access Apps" 
+                        : !spaceId?.trim() 
+                          ? "Space ID is required to access Apps" 
+                          : ""
+                  },
+                  {
+                    id: 'tools',
+                    name: 'Tools',
+                    icon: <Wrench className="w-4 h-4" />,
+                    disabled: authStatus !== 'success' || !spaceId?.trim(),
+                    disabledReason: authStatus !== 'success'
+                      ? "Please log in to access Tools"
+                      : !spaceId?.trim()
+                        ? "Space ID is required to access Tools"
+                        : ""
+                  }
+                ]}
+                    className="flex-1"
+                  />
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation(); 
+                      setShouldShowSettings(true);
+                      setIsSettingsVisible(true);
+                    }}
+                    className="ml-2 p-2 rounded-full hover:bg-gray-100"
+                    title="Configuration Settings"
+                  >
+                    <Settings className="w-5 h-5" />
+                  </button>
             </div>
-          </div>
-        </div>
+
+            {/* Authentication required message */}
+            {authStatus !== 'success' && (
+              <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
+                <div className="mr-2 flex-shrink-0">⚠️</div>
+                <div>Please log in to access Tools and Apps</div>
+              </div>
+            )}
+
+                {/* Missing required fields message */}
+                {authStatus === 'success' && !hasRequiredFields() && (
+                  <div className="mb-4 text-amber-600 bg-amber-50 border border-amber-200 p-3 rounded-md text-sm flex items-start">
+                    <div className="mr-2 flex-shrink-0">⚠️</div>
+                    <div>
+                      Please configure required fields in 
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // Stop any event bubbling
+                          console.log('Settings link clicked, showing settings panel');
+                          setShouldShowSettings(true);
+                          setIsSettingsVisible(true);
+                        }}
+                        className="text-indigo-600 font-semibold ml-1 hover:underline"
+                      >
+                        Configuration Settings
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+            {/* Content based on selected view */}
+            <div className="flex-1">
+              {sidebarView === 'tools' ? (
+                <>
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-xl font-bold">Available Tools</h2>
+                    <button
+                      onClick={() => loadTools(true)} // Force refresh on button click
+                      disabled={isToolsRefreshing}
+                      className="p-2 rounded-full hover:bg-gray-100"
+                      title="Refresh Tools"
+                    >
+                      <RefreshCw className={`w-5 h-5 ${isToolsRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  
+                  {availableTools.length > 0 ? (
+                    <div className="space-y-3 pb-4 overflow-y-auto h-[calc(100vh-170px)]">
+                      {availableTools.map((tool: Tool, index: number) => (
+                        <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Wrench className="w-5 h-5 text-blue-500" />
+                            <h3 className="font-semibold text-blue-700">{tool.function.name}</h3>
+                          </div>
+                          <p className="text-sm text-gray-600 pl-7">{
+                            tool.function.description
+                              .split('. ')[0]
+                              .replace("This tool is designed to execute the ", "")
+                              .replace(" operation on the ", " - ")
+                              .replace(" platform", "")
+                          }</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    isToolsRefreshing ? (
+                      <div className="flex items-center justify-center h-20">
+                        <div className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-solid border-indigo-600 border-r-transparent align-[-0.125em] mr-2"></div>
+                        <p className="text-gray-600">Loading tools...</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg  space-y-4">
+                        <div className="p-4 bg-indigo-100 rounded-full">
+                          <Wrench className="w-8 h-8 text-indigo-600" />
+                        </div>
+                        <h3 className="text-lg font-semibold text-gray-800">No Tools Available</h3>
+                        
+                        <p className="text-gray-600 max-w-md">
+                          
+                          <span className="block mt-3">To set them up, go to the <span className="font-semibold">MCP page</span>, select the relevant <span className="font-semibold">connector</span>, and choose the tools you want to enable.</span>
+                        </p>
+                        <div className="flex flex-wrap gap-3 justify-center mt-2">
+                          <button 
+                            onClick={() => {
+                              if (connectorsDataNull === true) {
+                                // If there are no apps, navigate to apps tab
+                                setSidebarView('apps');
+                              } else {
+                                // Otherwise, open the external URL
+                                window.open(`https://live.fastn.ai/app/projects/${spaceId}/ucl`, '_blank');
+                              }
+                            }}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
+                          >
+                             Add Tools
+                          </button>
+                          
+                        </div>
+                      </div>
+                    )
+                  )}
+                </>
+                  ) : (
+                <div className="h-full w-full flex flex-col">
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-xl font-bold">Available Apps</h2>
+                    <button
+                      onClick={() => loadWidgets(true)} // Force refresh on button click
+                      disabled={isAppsRefreshing || !tenantId}
+                      className={`p-2 rounded-full hover:bg-gray-100 ${(!tenantId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={!tenantId ? "Enter Tenant ID to Load Apps" : "Refresh Apps"}
+                    >
+                      <RefreshCw className={`w-5 h-5 ${isAppsRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 170px)' }}>
+                    {tenantId && authToken ? (
+                      <>
+                        {widgetMounted && (
+                          <>
+                            {!!connectorsDataNull ? (
+                              <div className="flex flex-col items-center justify-center p-6 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+                                <div className="p-4 bg-indigo-100 rounded-full">
+                                  <LayoutGrid className="w-8 h-8 text-indigo-600" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-800">No Apps Available</h3>
+                                
+                                <p className="text-gray-600 max-w-md">
+                                  <span className="block mt-3">To get started, head over to the MCP page and activate the connectors you need — such as <span className="font-semibold">Google Docs</span>, <span className="font-semibold">Slack</span>, <span className="font-semibold">HubSpot</span>, and more.</span>
+                                </p>
+                                <div className="flex flex-wrap gap-3 justify-center mt-2">
+                                  <a 
+                                    href={`https://live.fastn.ai/app/projects/${spaceId}/ucl`} 
+                                    target="_blank" 
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center"
+                                  >
+                                    Go to MCP
+                                  </a>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="h-full w-full overflow-auto">
+                                <FastnWidget
+                                  key={widgetKey}
+                                  projectId={spaceId}
+                                  authToken={authToken}
+                                  tenantId={tenantId}
+                                  apiKey={apiKey}
+                                  theme="light"
+                                  env={`DRAFT&enableAIActionAgent=false&oauth-popup-width=${getOauthPopUpDimensions().width}&oauth-popup-height=${getOauthPopUpDimensions().height}&oauth-popup-top=${getOauthPopUpDimensions().top}&oauth-popup-left=${getOauthPopUpDimensions().left}`}
+                                  style={{
+                                    height: '100%',
+                                    minHeight: (() => {
+                                      // Responsive min-height based on screen size
+                                      if (window.innerWidth < 768) return '300px'; // Mobile
+                                      if (window.innerWidth < 1024) return '400px'; // Tablet/Medium
+                                      return '500px'; // Desktop
+                                    })(),
+                                    width: '100%',
+                                    maxWidth: '100%',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    overflow: 'auto' // Ensure content can scroll on small screens
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500 text-center text-sm px-4">
+                          Enter Tenant ID to view available Apps.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                  )}
+                            </div>
+              </>
+            )}
+                          </div>
+                            </div>
       </div>
     </div>
   );
