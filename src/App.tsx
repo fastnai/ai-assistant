@@ -407,6 +407,7 @@ function App() {
     setPassword('');
     setTenantId('');
     setSpaceId('');
+    setApiKey('')
     // Clear localStorage data
     localStorage.removeItem('fastnAuthToken');
     localStorage.removeItem('fastnRefreshToken');
